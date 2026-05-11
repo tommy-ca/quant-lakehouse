@@ -28,6 +28,7 @@ ALL_TRADE_TYPES = [TradeType.spot, TradeType.um, TradeType.cm]
     name="venues",
     write_disposition="replace",
     columns=VenueModel,
+    schema_contract={"columns": "freeze", "data_type": "freeze"},
 )
 def venues_resource(
     venues: list[dict[str, Any]] | None = None,
@@ -62,6 +63,7 @@ def venues_resource(
     name="symbols",
     write_disposition="replace",
     columns=SymbolMetaModel,
+    schema_contract={"columns": "freeze", "data_type": "freeze"},
 )
 def symbols_resource(
     trade_types: list[TradeType] | None = None,

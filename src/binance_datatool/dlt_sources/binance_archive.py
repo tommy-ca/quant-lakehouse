@@ -153,6 +153,7 @@ def _resource_kwargs(data_type: str) -> dict[str, Any]:
         "write_disposition": "merge",
         "primary_key": _PRIMARY_KEYS[data_type],
         "columns": _DATA_TYPE_COLUMNS[data_type],
+        "schema_contract": {"columns": "freeze", "data_type": "freeze"},
     }
 
 

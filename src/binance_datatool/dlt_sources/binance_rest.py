@@ -35,6 +35,7 @@ def _client_for(trade_type: TradeType):
     write_disposition="merge",
     primary_key=("symbol", "agg_trade_id"),
     columns=AggTradeModel,
+    schema_contract={"columns": "freeze", "data_type": "freeze"},
 )
 def agg_trades_resource(
     symbol: str,
@@ -79,6 +80,7 @@ def agg_trades_resource(
     write_disposition="merge",
     primary_key=("symbol", "funding_time"),
     columns=FundingRateModel,
+    schema_contract={"columns": "freeze", "data_type": "freeze"},
 )
 def funding_rate_resource(
     symbol: str,

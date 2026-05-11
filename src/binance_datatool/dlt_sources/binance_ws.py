@@ -19,6 +19,7 @@ from binance_datatool.common.enums import TradeType
 @dlt.resource(
     name="ws_klines",
     write_disposition="append",
+    schema_contract={"columns": "freeze", "data_type": "freeze"},
     columns={
         "open_time": {"data_type": "bigint", "nullable": False},
         "open": {"data_type": "double", "nullable": False},

@@ -28,6 +28,7 @@ from binance_datatool.validation.models import KlineModel
     write_disposition="merge",
     primary_key=("symbol", "interval", "open_time"),
     columns=KlineModel,
+    schema_contract={"columns": "freeze", "data_type": "freeze"},
 )
 def klines_resource(
     symbol: str,
