@@ -225,3 +225,4 @@ temp/
 .agents/
 .claude/
 skills-lock.json
+test.duckdb

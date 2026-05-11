@@ -13,7 +13,7 @@ gateways:
         - parquet
         - json
 
-default_environment: prod
+default_target_environment: prod
 
 model_defaults:
   dialect: duckdb

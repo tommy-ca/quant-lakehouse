@@ -604,12 +604,10 @@ def transform_to_silver(
         )
         if silver.is_empty():
             return 0
-        con.execute("CREATE SCHEMA IF NOT EXISTS silver")
-        con.execute(
-            "CREATE TABLE IF NOT EXISTS silver.klines AS SELECT * FROM silver.klines WHERE FALSE"
-        )
-        con.execute("DELETE FROM silver.klines WHERE symbol = ?", [symbol])
         _arrow = silver.to_arrow()
+        con.execute("CREATE SCHEMA IF NOT EXISTS silver")
+        con.execute("CREATE TABLE IF NOT EXISTS silver.klines AS SELECT * FROM _arrow WHERE FALSE")
+        con.execute("DELETE FROM silver.klines WHERE symbol = ?", [symbol])
         con.execute("INSERT INTO silver.klines SELECT * FROM _arrow")
         return silver.height
     finally:
@@ -727,13 +725,12 @@ def transform_agg_trades_to_silver(
         silver = bronze_agg_trades_to_silver(bronze, symbol=symbol, trade_type=trade_type)
         if silver.is_empty():
             return 0
+        _arrow = silver.to_arrow()
         con.execute("CREATE SCHEMA IF NOT EXISTS silver")
         con.execute(
-            "CREATE TABLE IF NOT EXISTS silver.agg_trades AS "
-            "SELECT * FROM silver.agg_trades WHERE FALSE"
+            "CREATE TABLE IF NOT EXISTS silver.agg_trades AS SELECT * FROM _arrow WHERE FALSE"
         )
         con.execute("DELETE FROM silver.agg_trades WHERE symbol = ?", [symbol])
-        _arrow = silver.to_arrow()
         con.execute("INSERT INTO silver.agg_trades SELECT * FROM _arrow")
         return silver.height
     finally:
@@ -760,13 +757,12 @@ def transform_funding_rate_to_silver(
         silver = bronze_funding_rate_to_silver(bronze, symbol=symbol, trade_type=trade_type)
         if silver.is_empty():
             return 0
+        _arrow = silver.to_arrow()
         con.execute("CREATE SCHEMA IF NOT EXISTS silver")
         con.execute(
-            "CREATE TABLE IF NOT EXISTS silver.funding_rate AS "
-            "SELECT * FROM silver.funding_rate WHERE FALSE"
+            "CREATE TABLE IF NOT EXISTS silver.funding_rate AS SELECT * FROM _arrow WHERE FALSE"
         )
         con.execute("DELETE FROM silver.funding_rate WHERE symbol = ?", [symbol])
-        _arrow = silver.to_arrow()
         con.execute("INSERT INTO silver.funding_rate SELECT * FROM _arrow")
         return silver.height
     finally:
@@ -780,9 +776,18 @@ def run_sqlmesh_plan(
     end: str | None = None,
 ) -> dict:
     """Run SQLMesh plan to apply pending model changes."""
-    from sqlmesh import Context
+    from pathlib import Path
 
-    ctx = Context(paths=["config.yaml"])
+    from sqlmesh import Context
+    from sqlmesh.utils.errors import ConfigError
+
+    _root = Path(__file__).resolve().parent.parent.parent.parent
+    cfg_path = str(_root / "config.yaml")
+    try:
+        ctx = Context(paths=[cfg_path])
+    except ConfigError as e:
+        return {"environment": environment, "applied": False, "error": str(e).split("\n")[0]}
+
     plan = ctx.plan(environment, start=start, end=end, include_unmodified=False)
     plan.apply()
     return {"environment": environment, "applied": True}

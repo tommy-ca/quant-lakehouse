@@ -61,7 +61,7 @@ def run_source(
     schema = pipeline.default_schema
     tables_loaded: list[str] = []
     if schema:
-        tables_loaded = [t.name for t in schema.data_tables()]
+        tables_loaded = [t["name"] for t in schema.data_tables()]
     return {
         "load_info": str(load_info),
         "dataset_name": dataset_name,
