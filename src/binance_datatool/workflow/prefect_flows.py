@@ -16,10 +16,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from pathlib import Path
+from typing import Any
 
 from prefect import flow, task
 from prefect.task_runners import ThreadPoolTaskRunner
@@ -1111,6 +1109,54 @@ def dlt_historical_pipeline(
     return results
 
 
+# ── DuckLake Maintenance ────────────────────────────────────────
+
+
+@flow(name="DuckLake Maintenance", log_prints=True)
+def ducklake_maintenance_flow(
+    lake_path: str | None = None,
+) -> dict:
+    """Compact DuckLake Parquet files (merge_adjacent_files).
+
+    Run periodically (e.g. daily) to reduce small-file overhead from
+    incremental dlt loads. Uses DuckDB's `CALL merge_adjacent_files()`
+    which is supported on DuckDB 1.4+ with the ducklake extension.
+    """
+    import duckdb
+
+    _lp = Path(lake_path) if lake_path else _DEFAULT_ARCHIVE_HOME.parent / "lake"
+    meta = _lp / "metadata.ducklake"
+
+    if not meta.exists():
+        print(f"  DuckLake metadata not found at {meta}")
+        return {"tables_checked": 0, "error": "metadata not found"}
+
+    con = duckdb.connect(str(_lp / "catalog.duckdb"))
+    try:
+        con.execute("LOAD ducklake")
+        con.execute(
+            f"ATTACH 'ducklake:{meta}' AS dl (DATA_PATH '{_lp}/data', AUTOMATIC_MIGRATION true)"
+        )
+        con.execute("USE dl")
+
+        tables = con.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'main' ORDER BY table_name"
+        ).fetchall()
+
+        count = 0
+        for (tbl,) in tables:
+            try:
+                con.execute(f"CALL dl.merge_adjacent_files('{tbl}')")
+                count += 1
+                print(f"  Compacted: {tbl}")
+            except Exception:
+                pass
+        return {"tables_checked": count}
+    finally:
+        con.close()
+
+
 # ── Deployment Entry Points ─────────────────────────────────────
 
 if __name__ == "__main__":
@@ -1124,6 +1170,7 @@ if __name__ == "__main__":
             refresh_metadata_flow.to_deployment(name="hourly-metadata", cron="0 * * * *"),
             dlt_sqlmesh_pipeline.to_deployment(name="dlt-sqlmesh-e2e", cron="0 */12 * * *"),
             dlt_historical_pipeline.to_deployment(name="dlt-historical", cron="0 */6 * * *"),
+            ducklake_maintenance_flow.to_deployment(name="ducklake-compact", cron="0 3 * * *"),
         )
     else:
         dlt_historical_pipeline()
