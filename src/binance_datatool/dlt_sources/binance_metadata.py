@@ -20,6 +20,7 @@ import dlt
 
 from binance_datatool.archive.client import ArchiveClient
 from binance_datatool.common.enums import DataFrequency, DataType, TradeType
+from binance_datatool.validation.models import SymbolMetaModel, VenueModel
 from binance_datatool.workflow.list_symbols import ArchiveListSymbolsWorkflow
 
 ALL_TRADE_TYPES = [TradeType.spot, TradeType.um, TradeType.cm]
@@ -45,12 +46,7 @@ INTERVAL_TYPES = {"klines", "indexPriceKlines", "markPriceKlines", "premiumIndex
 @dlt.resource(
     name="venues",
     write_disposition="replace",
-    columns={
-        "trade_type": {"data_type": "text", "nullable": False},
-        "data_types": {"data_type": "text", "nullable": True},
-        "frequencies": {"data_type": "text", "nullable": True},
-        "fetched_at": {"data_type": "bigint", "nullable": False},
-    },
+    columns=VenueModel,
 )
 def venues_resource() -> list[dict[str, Any]]:
     """Discover venues (trade types) and their capabilities from S3.
@@ -122,18 +118,7 @@ def _list_archive_symbols(trade_type: TradeType, data_type: DataType) -> list[st
 @dlt.resource(
     name="symbols",
     write_disposition="replace",
-    columns={
-        "symbol": {"data_type": "text", "nullable": False},
-        "trade_type": {"data_type": "text", "nullable": False},
-        "data_type": {"data_type": "text", "nullable": False},
-        "base_asset": {"data_type": "text", "nullable": True},
-        "quote_asset": {"data_type": "text", "nullable": True},
-        "contract_type": {"data_type": "text", "nullable": True},
-        "is_leverage": {"data_type": "bool", "nullable": True},
-        "is_stable_pair": {"data_type": "bool", "nullable": True},
-        "source": {"data_type": "text", "nullable": False},
-        "fetched_at": {"data_type": "bigint", "nullable": False},
-    },
+    columns=SymbolMetaModel,
 )
 def symbols_resource(
     trade_type: TradeType = TradeType.spot,
