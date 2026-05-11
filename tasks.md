@@ -106,7 +106,7 @@ Prefect orchestration, archive cache, gap detection, explorer. 283 new-stack tes
 | ⏳ | 8.1 | FR | Sink: replace `SinkWorkflow` with `transforms/*.py` + `write_silver_table()` |
 | ⏳ | 8.2 | FR | Gap-fill: replace `GapFillWorkflow` with `dlt_sqlmesh_pipeline(source='rest')` |
 | ⏳ | 8.3 | FR | Health: replace archive-level checks with DuckLake anomaly detection |
-| ⏳ | 8.4 | FR | Metadata: replace `MetadataWorkflow` with `dlt` metadata sources |
+| ✅ | 8.4 | FR | Metadata: replace `MetadataWorkflow` with `dlt` metadata sources |
 | ⏳ | 8.5 | D | Mark legacy workflows as deprecated in docstrings |
 | ✅ | 9.1 | C | Move `datacontract.py` (443 LOC, unused) to `docs/proposals/` |
 | ✅ | 9.2 | C | Move `lineage.py` (401 LOC, legacy-only) to `workflow/legacy/` |

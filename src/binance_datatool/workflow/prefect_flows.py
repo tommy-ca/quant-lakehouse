@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from prefect import flow, task
 from prefect.task_runners import ThreadPoolTaskRunner
@@ -35,7 +37,6 @@ from binance_datatool.workflow import (
     ArchiveListSymbolsWorkflow,
     ArchiveVerifyWorkflow,
     GapFillWorkflow,
-    MetadataWorkflow,
     SinkWorkflow,
 )
 from binance_datatool.workflow.health_check import check_ducklake_anomalies
@@ -445,27 +446,39 @@ def refresh_metadata_flow(
     from_api: bool = False,
     duckdb_path: str | None = None,
 ) -> int:
-    """Refresh venue/symbol metadata. Wraps MetadataWorkflow with Prefect.
+    """Refresh venue/symbol metadata via dlt sources.
 
     Uses the ``ducklake-writer`` concurrency guard to avoid racing with
     :func:`sink_silver` when both run as separate deployments.
+
+    Uses dlt ``build_metadata_source`` for symbol discovery.
     """
     from prefect.concurrency.sync import concurrency as _pcon
 
     with _pcon("ducklake-writer", occupy=1):
         home = _DEFAULT_ARCHIVE_HOME
         catalog = catalog_path or home.parent / "lake"
-        client = ArchiveClient()
-        wf = MetadataWorkflow(
-            archive_client=client,
-            catalog_path=catalog,
-            source_label="api" if from_api else "archive",
-            duckdb_path=Path(duckdb_path) if duckdb_path else catalog / "catalog.duckdb",
-        )
-        wf.save_venues(wf.refresh_venues())
-        syms = asyncio.run(wf.refresh_symbols(TradeType(trade_type)))
-        wf.save_symbols(syms)
-        return len(syms)
+        db_path = str(duckdb_path) if duckdb_path else str(catalog / "catalog.duckdb")
+
+        # dlt metadata source (preferred)
+        from binance_datatool.common.enums import TradeType
+        from binance_datatool.dlt_sources.binance_metadata import build_metadata_source
+        from binance_datatool.dlt_sources.pipeline import run_source
+
+        source = build_metadata_source(trade_types=[TradeType(trade_type)])
+        run_source(source, source_name="metadata_refresh", catalog_path=db_path)
+        try:
+            import duckdb
+
+            con = duckdb.connect(db_path)
+            cnt = con.execute(
+                "SELECT COUNT(*) FROM metadata.symbols WHERE trade_type = ?",
+                [trade_type],
+            ).fetchone()[0]
+            con.close()
+            return cnt
+        except Exception:
+            return 0
 
 
 @flow(name="Health Check", log_prints=True)
