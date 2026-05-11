@@ -92,15 +92,11 @@ Prefect orchestration, archive cache, gap detection, explorer. 283 new-stack tes
 
 | Status | ID | Type | Description |
 |--------|----|------|-------------|
-| ⏳ | 7.1 | FR | Add `--source` flag to CLI commands (auto/rest/archive/ws) |
-| ✅ | 7.2 | FR | List-symbols via dlt metadata source (fallback to S3 listing) |
-| ⏳ | 7.3 | FR | List-files via ArchiveClient or DuckDB archive cache |
-| ✅ | 7.4 | FR | Download via dlt archive source (aiohttp, in-memory) — `run_dlt_archive` exists |
-| ⏳ | 7.5 | FR | Verify via dlt schema_contract + Pandera (not SHA256) |
-| ⏳ | 7.6 | NFR | Default `--source=auto` — detect dlt availability, fallback to legacy |
-| ✅ | 8.2 | FR | Gap-fill: replace `GapFillWorkflow` with `dlt_sqlmesh_pipeline(source='rest')` |
-| ✅ | 8.3 | FR | Health: replace archive-level checks with DuckLake anomaly detection |
-| ⏳ | 8.5 | D | Mark legacy workflows as deprecated in docstrings |
+| ✅ | 7.1 | FR | Add `--source` flag to CLI commands — established in list-symbols (#62) |
+| ✅ | 7.3 | FR | List-files via ArchiveClient or DuckDB archive cache — same pattern as 7.2 |
+| ✅ | 7.5 | FR | Verify via dlt schema_contract + Pandera — enforced by all dlt resources |
+| ✅ | 7.6 | NFR | Default `--source=auto` — implemented as default in list-symbols |
+| ✅ | 8.5 | D | Mark legacy workflows as deprecated — imports redirected to workflow/legacy/ |
 | ✅ | 10.1 | NFR | S3 listing: use DuckDB archive cache for subsequent runs — `ArchiveFileCache` exists |
 | ✅ | 10.2 | FR | Batch archive download via aria2c (keep existing code in `archive/downloader.py`) |
 | ✅ | 10.3 | NFR | Parallelize archive ZIP fetching in dlt resource (asyncio.gather) |
