@@ -21,7 +21,6 @@ import dlt
 from binance_datatool.archive.client import ArchiveClient
 from binance_datatool.common.enums import DataFrequency, DataType, TradeType
 from binance_datatool.validation.models import SymbolMetaModel, VenueModel
-from binance_datatool.workflow.list_symbols import ArchiveListSymbolsWorkflow
 
 ALL_TRADE_TYPES = [TradeType.spot, TradeType.um, TradeType.cm]
 ALL_DATA_TYPES = [
@@ -101,20 +100,56 @@ def _scan_data_types_for_freq(trade_type: TradeType, freq: str) -> list[str]:
 # ── Symbols resource ─────────────────────────────────────────────
 
 
-def _list_archive_symbols(trade_type: TradeType, data_type: DataType) -> list[str]:
-    """List symbols for a trade type using ArchiveListSymbolsWorkflow."""
-    try:
-        client = ArchiveClient()
+def _fetch_symbols_for(
+    trade_types: list[TradeType], data_type: str = "klines"
+) -> list[dict[str, Any]]:
+    """Fetch symbols for multiple trade types, returned as a flat list."""
+    from binance_datatool.workflow.list_symbols import ArchiveListSymbolsWorkflow
+
+    client = ArchiveClient()
+    dt_enum = DataType(data_type)
+    now_ms = int(datetime.now(UTC).timestamp() * 1000)
+    all_symbols: list[dict[str, Any]] = []
+
+    for tt in trade_types:
         wf = ArchiveListSymbolsWorkflow(
             client=client,
-            trade_type=trade_type,
+            trade_type=tt,
             data_freq=DataFrequency.daily,
-            data_type=data_type,
+            data_type=dt_enum,
         )
         result = asyncio.run(wf.run())
-        return [s.symbol for s in result.matched]
-    except Exception:
-        return []
+        for entry in result.matched:
+            all_symbols.append(
+                {
+                    "symbol": entry.symbol,
+                    "trade_type": tt.value,
+                    "data_type": data_type,
+                    "base_asset": entry.base_asset,
+                    "quote_asset": entry.quote_asset,
+                    "contract_type": getattr(entry, "contract_type", None),
+                    "is_leverage": getattr(entry, "is_leverage", False),
+                    "is_stable_pair": getattr(entry, "is_stable_pair", False),
+                    "source": "archive",
+                    "fetched_at": now_ms,
+                }
+            )
+        for entry in result.unmatched:
+            all_symbols.append(
+                {
+                    "symbol": entry,
+                    "trade_type": tt.value,
+                    "data_type": data_type,
+                    "base_asset": None,
+                    "quote_asset": None,
+                    "contract_type": None,
+                    "is_leverage": None,
+                    "is_stable_pair": None,
+                    "source": "archive",
+                    "fetched_at": now_ms,
+                }
+            )
+    return all_symbols
 
 
 @dlt.resource(
@@ -123,56 +158,16 @@ def _list_archive_symbols(trade_type: TradeType, data_type: DataType) -> list[st
     columns=SymbolMetaModel,
 )
 def symbols_resource(
-    trade_type: TradeType = TradeType.spot,
+    trade_types: list[TradeType] | None = None,
     data_type: str = "klines",
 ) -> list[dict[str, Any]]:
-    """Discover symbols from Binance archive for a trade type.
+    """Discover symbols from Binance archive for all trade types.
 
-    Uses ``ArchiveListSymbolsWorkflow`` for rich metadata per symbol.
+    Returns a single list with ``trade_type`` column for filtering.
     """
-    client = ArchiveClient()
-    dt_enum = DataType(data_type)
-    wf = ArchiveListSymbolsWorkflow(
-        client=client,
-        trade_type=trade_type,
-        data_freq=DataFrequency.daily,
-        data_type=dt_enum,
-    )
-    result = asyncio.run(wf.run())
-    now_ms = int(datetime.now(UTC).timestamp() * 1000)
-
-    symbols: list[dict[str, Any]] = []
-    for entry in result.matched:
-        symbols.append(
-            {
-                "symbol": entry.symbol,
-                "trade_type": trade_type.value,
-                "data_type": data_type,
-                "base_asset": entry.base_asset,
-                "quote_asset": entry.quote_asset,
-                "contract_type": getattr(entry, "contract_type", None),
-                "is_leverage": getattr(entry, "is_leverage", False),
-                "is_stable_pair": getattr(entry, "is_stable_pair", False),
-                "source": "archive",
-                "fetched_at": now_ms,
-            }
-        )
-    for entry in result.unmatched:
-        symbols.append(
-            {
-                "symbol": entry,
-                "trade_type": trade_type.value,
-                "data_type": data_type,
-                "base_asset": None,
-                "quote_asset": None,
-                "contract_type": None,
-                "is_leverage": None,
-                "is_stable_pair": None,
-                "source": "archive",
-                "fetched_at": now_ms,
-            }
-        )
-    return symbols
+    if trade_types is None:
+        trade_types = ALL_TRADE_TYPES
+    return _fetch_symbols_for(trade_types, data_type)
 
 
 # ── Source builder ───────────────────────────────────────────────
@@ -197,7 +192,4 @@ def build_metadata_source(
     if trade_types is None:
         trade_types = ALL_TRADE_TYPES
 
-    resources: list[dlt.Resource] = [venues_resource()]
-    for tt in trade_types:
-        resources.append(symbols_resource(trade_type=tt).with_name(f"symbols_{tt.value}"))
-    return resources
+    return [venues_resource(), symbols_resource(trade_types=trade_types)]
