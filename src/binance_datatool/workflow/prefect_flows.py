@@ -15,6 +15,7 @@ Design patterns (dataskew.io/blog/data-pipeline-design-patterns):
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -58,7 +59,7 @@ _REST_CLIENTS = {
 # ── Dead Letter Queue ───────────────────────────────────────────
 
 
-_log = __import__("logging").getLogger(__name__)
+_log = logging.getLogger(__name__)
 
 
 def _route_to_dlq(catalog: Path, symbol: str, data_type: str, errors: list[str]) -> None:
@@ -113,8 +114,6 @@ def download_archive(
     archive_home: Path | None = None,
 ) -> int:
     """Download archive data via ArchiveDownloadWorkflow."""
-    import asyncio
-
     home = archive_home or _DEFAULT_ARCHIVE_HOME
     dt = DataType(data_type)
     wf = ArchiveDownloadWorkflow(
@@ -127,7 +126,7 @@ def download_archive(
         lookback_days=lookback_days,
     )
     result = asyncio.run(wf.run())
-    return result.downloaded  # ty: ignore[unresolved-attribute]
+    return result.downloaded  # type: ignore[unresolved-attribute]
 
 
 @task(**_RETRY_CONFIG)
