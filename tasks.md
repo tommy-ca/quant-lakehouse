@@ -83,6 +83,62 @@ Status: `⏳` pending, `🔄` in progress, `✅` done, `❌` cancelled
 
 ---
 
+## Phase 7: CLI + dlt Integration
+
+| Status | ID | Type | Description |
+|--------|----|------|-------------|
+| ⏳ | 7.1 | FR | Add `--source` flag to CLI commands (auto/rest/archive/ws) |
+| ⏳ | 7.2 | FR | List-symbols via dlt metadata source (fallback to S3 listing) |
+| ⏳ | 7.3 | FR | List-files via ArchiveClient or DuckDB archive cache |
+| ⏳ | 7.4 | FR | Download via dlt archive source (aiohttp, in-memory) |
+| ⏳ | 7.5 | FR | Verify via dlt schema_contract + Pandera (not SHA256) |
+| ⏳ | 7.6 | NFR | Default `--source=auto` — detect dlt availability, fallback to legacy |
+
+## Phase 8: Workflow Consolidation
+
+| Status | ID | Type | Description |
+|--------|----|------|-------------|
+| ⏳ | 8.1 | FR | Sink: replace `SinkWorkflow` with `transforms/*.py` + `write_silver_table()` |
+| ⏳ | 8.2 | FR | Gap-fill: replace `GapFillWorkflow` with `dlt_sqlmesh_pipeline(source='rest')` |
+| ⏳ | 8.3 | FR | Health: replace archive-level checks with DuckLake anomaly detection |
+| ⏳ | 8.4 | FR | Metadata: replace `MetadataWorkflow` with `dlt` metadata sources |
+| ⏳ | 8.5 | D | Mark legacy workflows as deprecated in docstrings |
+
+## Phase 9: Legacy Code Retirement
+
+| Status | ID | Type | Description |
+|--------|----|------|-------------|
+| ⏳ | 9.1 | C | Move `datacontract.py` (443 LOC, unused) to `docs/proposals/` |
+| ⏳ | 9.2 | C | Move `lineage.py` (401 LOC, legacy-only) to `workflow/legacy/` |
+| ⏳ | 9.3 | C | Move `catalog.py` (DuckLakeCatalog, 365 LOC) to `workflow/legacy/` |
+| ⏳ | 9.4 | T | Keep legacy tests until legacy code is removed |
+| ⏳ | 9.5 | D | Update all docs to reference new stack as primary |
+
+## Phase 10: Performance Optimization
+
+| Status | ID | Type | Description |
+|--------|----|------|-------------|
+| ⏳ | 10.1 | NFR | S3 listing: use DuckDB archive cache for subsequent runs (done: ArchiveFileCache) |
+| ⏳ | 10.2 | NFR | Archive download: evaluate aria2c for full backfill (see download-analysis below) |
+| ⏳ | 10.3 | NFR | Parallelize archive ZIP fetching in dlt resource |
+| ⏳ | 10.4 | NFR | Add DuckLake table maintenance (CALL merge_adjacent_files) to Prefect flows |
+
+---
+
+## Downloaded Data Analysis
+
+Archive ZIP download comparison for dlt pipeline:
+
+| Approach | Mechanism | Throughput | 6400 files | 14 files (lookback=7d) | Complexity |
+|----------|-----------|------------|------------|------------------------|------------|
+| **aiohttp** (current) | 1 file/request, sequential, in-memory | ~1.3 files/s | ~82 min | ~11s | Low (no deps) |
+| **aria2c** | N files/request, parallel, to-disk | ~21 files/s (16 conns) | ~5 min | ~1s | Medium (subprocess, disk I/O) |
+| **asyncio.gather** | N files/request, parallel, in-memory | ~16 files/s | ~6 min | ~1s | Low (stdlib) |
+
+**Recommendation**: Keep aiohttp for dlt (simple, matches dlt's in-memory resource pattern). For full backfill performance, add `asyncio.gather()` parallel fetch to the archive dlt resource (no new dependencies, ~10 lines of code change). aria2c adds subprocess + disk I/O complexity that isn't justified for the common incremental case.
+
+---
+
 ## Pending Items (FR over NFR)
 
 ### FR-1: CLI reference docs missing 4 commands
