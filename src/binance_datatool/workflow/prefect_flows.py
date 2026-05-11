@@ -582,14 +582,10 @@ def transform_to_silver(
     Uses Polars for the Bronze→Silver transform. The silver DataFrame is
     registered as a DuckDB view (zero-copy) then inserted via SQL.
     """
-    import duckdb
-
     from binance_datatool.transforms.klines import bronze_klines_to_silver
+    from binance_datatool.workflow.db import get_connection, write_silver_table
 
-    db_file = catalog_path or str(
-        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
-    )
-    con = duckdb.connect(db_file)
+    con = get_connection(catalog_path=catalog_path)
     try:
         bronze = con.execute(
             "SELECT open_time, open, high, low, close, volume, close_time, "
@@ -604,12 +600,7 @@ def transform_to_silver(
         )
         if silver.is_empty():
             return 0
-        _arrow = silver.to_arrow()
-        con.execute("CREATE SCHEMA IF NOT EXISTS silver")
-        con.execute("CREATE TABLE IF NOT EXISTS silver.klines AS SELECT * FROM _arrow WHERE FALSE")
-        con.execute("DELETE FROM silver.klines WHERE symbol = ?", [symbol])
-        con.execute("INSERT INTO silver.klines SELECT * FROM _arrow")
-        return silver.height
+        return write_silver_table(con, "klines", silver.to_arrow(), symbol)
     finally:
         con.close()
 
@@ -786,27 +777,20 @@ def transform_agg_trades_to_silver(
     catalog_path: str | None = None,
 ) -> int:
     """Read bronze aggTrades from DuckDB, transform to Silver, write back."""
-    import duckdb
-
     from binance_datatool.transforms.agg_trades import bronze_agg_trades_to_silver
+    from binance_datatool.workflow.db import get_connection, write_silver_table
 
-    db_file = catalog_path or str(
-        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
-    )
-    con = duckdb.connect(db_file)
+    con = get_connection(catalog_path=catalog_path)
     try:
-        bronze = con.execute(f"SELECT * FROM bronze.rest_{symbol.lower()}_agg_trades").pl()
+        bronze = con.execute(
+            f"SELECT agg_trade_id, price, quantity, transact_time, "
+            f"is_buyer_maker, symbol "
+            f"FROM bronze.rest_{symbol.lower()}_agg_trades"
+        ).pl()
         silver = bronze_agg_trades_to_silver(bronze, symbol=symbol, trade_type=trade_type)
         if silver.is_empty():
             return 0
-        _arrow = silver.to_arrow()
-        con.execute("CREATE SCHEMA IF NOT EXISTS silver")
-        con.execute(
-            "CREATE TABLE IF NOT EXISTS silver.agg_trades AS SELECT * FROM _arrow WHERE FALSE"
-        )
-        con.execute("DELETE FROM silver.agg_trades WHERE symbol = ?", [symbol])
-        con.execute("INSERT INTO silver.agg_trades SELECT * FROM _arrow")
-        return silver.height
+        return write_silver_table(con, "agg_trades", silver.to_arrow(), symbol)
     finally:
         con.close()
 
@@ -818,27 +802,19 @@ def transform_funding_rate_to_silver(
     catalog_path: str | None = None,
 ) -> int:
     """Read bronze fundingRate from DuckDB, transform to Silver, write back."""
-    import duckdb
-
     from binance_datatool.transforms.funding_rate import bronze_funding_rate_to_silver
+    from binance_datatool.workflow.db import get_connection, write_silver_table
 
-    db_file = catalog_path or str(
-        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
-    )
-    con = duckdb.connect(db_file)
+    con = get_connection(catalog_path=catalog_path)
     try:
-        bronze = con.execute(f"SELECT * FROM bronze.rest_{symbol.lower()}_funding_rate").pl()
+        bronze = con.execute(
+            f"SELECT symbol, funding_time, funding_rate "
+            f"FROM bronze.rest_{symbol.lower()}_funding_rate"
+        ).pl()
         silver = bronze_funding_rate_to_silver(bronze, symbol=symbol, trade_type=trade_type)
         if silver.is_empty():
             return 0
-        _arrow = silver.to_arrow()
-        con.execute("CREATE SCHEMA IF NOT EXISTS silver")
-        con.execute(
-            "CREATE TABLE IF NOT EXISTS silver.funding_rate AS SELECT * FROM _arrow WHERE FALSE"
-        )
-        con.execute("DELETE FROM silver.funding_rate WHERE symbol = ?", [symbol])
-        con.execute("INSERT INTO silver.funding_rate SELECT * FROM _arrow")
-        return silver.height
+        return write_silver_table(con, "funding_rate", silver.to_arrow(), symbol)
     finally:
         con.close()
 
