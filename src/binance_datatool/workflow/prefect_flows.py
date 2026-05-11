@@ -523,6 +523,35 @@ def health_flow(
 # ── dlt + SQLMesh Pipeline ──────────────────────────────────────
 
 
+@task
+def detect_bronze_gaps(
+    symbol: str,
+    data_type: str = "klines",
+    lookback_days: int = 30,
+    catalog_path: str | None = None,
+) -> list[tuple[str, int, int]]:
+    """Detect date gaps in DuckDB bronze table for a symbol.
+
+    Returns gaps as ``(symbol, start_ms, end_ms)``. Empty list = no gaps.
+
+    Runs before dlt extraction so the pipeline can skip symbols with
+    complete data.
+    """
+    from binance_datatool.dlt_sources.gap_detection import detect_bronze_gaps as _detect
+
+    db_path = catalog_path or str(
+        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
+    )
+
+    _table_map = {
+        "klines": f"bronze.{symbol.lower()}_klines",
+        "aggTrades": f"bronze.rest_{symbol.lower()}_agg_trades",
+        "fundingRate": f"bronze.rest_{symbol.lower()}_funding_rate",
+    }
+    table = _table_map.get(data_type, f"bronze.{symbol.lower()}_klines")
+    return _detect(db_path, table, [symbol], lookback_days)
+
+
 @task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
 def run_dlt_source(
     symbol: str,
@@ -808,6 +837,13 @@ def dlt_sqlmesh_pipeline(
     _iv = interval if data_type == "klines" else None
     _tt = "um" if data_type == "fundingRate" else trade_type
 
+    print(f"  Stage 0: gap detection — checking {symbol} {data_type}")
+    gaps = detect_bronze_gaps(symbol, data_type, lookback_days=30, catalog_path=db_path)
+    if not gaps:
+        print("    No gaps found — data is current")
+    else:
+        print(f"    {len(gaps)} gap(s) detected")
+
     print(f"  Stage 1: dlt ({source}) — ingesting {symbol} {data_type}")
     if source == "archive":
         dlt_result = run_dlt_archive(symbol, _iv, _tt, db_path)
@@ -824,7 +860,7 @@ def dlt_sqlmesh_pipeline(
     rows = transform_task(**kwargs)
     print(f"    silver rows: {rows}")
 
-    print("  Stage 3: SQLMesh — applying model")
+    print("  Stage 3: Pandera validation + DuckDB write")
     sm_result = run_sqlmesh_plan()
     print(f"    SQLMesh applied: {sm_result['applied']}")
 
@@ -832,6 +868,7 @@ def dlt_sqlmesh_pipeline(
         "symbol": symbol,
         "data_type": data_type,
         "source": source,
+        "gaps_detected": len(gaps),
         "dlt_tables": dlt_result["tables_loaded"],
         "silver_rows": rows,
         "sqlmesh_applied": sm_result["applied"],
