@@ -1,15 +1,26 @@
 """dlt resource for Binance archive (data.binance.vision S3).
 
-Wraps the existing ``ArchiveClient`` as a ``@dlt.resource``. Uses diff-based
-sync (dlt's merge disposition) to only load new/modified files.
+Fetches klines directly from the live ``data.binance.vision`` S3 archive using
+the existing ``ArchiveClient`` — no pre-downloaded local files needed.
+
+For each symbol, the resource:
+1. Lists available S3 files via ``ArchiveClient.list_symbol_files()``
+2. Downloads ZIP content via aiohttp
+3. Parses the CSV inside each ZIP
+4. Yields rows with merge-on-primary-key for idempotent loading
 """
 
 from __future__ import annotations
 
+import asyncio
+import io
+import zipfile
 from typing import TYPE_CHECKING
 
 import dlt
 
+from binance_datatool.archive.client import ArchiveClient
+from binance_datatool.common.constants import S3_DOWNLOAD_PREFIX
 from binance_datatool.common.enums import DataFrequency, DataType, TradeType
 
 if TYPE_CHECKING:
@@ -27,8 +38,9 @@ if TYPE_CHECKING:
         "low": {"data_type": "double", "nullable": False},
         "close": {"data_type": "double", "nullable": False},
         "volume": {"data_type": "double", "nullable": False},
+        "close_time": {"data_type": "bigint", "nullable": False},
         "quote_volume": {"data_type": "double", "nullable": False},
-        "trade_count": {"data_type": "bigint", "nullable": False},
+        "count": {"data_type": "bigint", "nullable": False},
         "taker_buy_volume": {"data_type": "double", "nullable": False},
         "taker_buy_quote_volume": {"data_type": "double", "nullable": False},
         "symbol": {"data_type": "text", "nullable": False},
@@ -39,54 +51,82 @@ def archive_klines_resource(
     symbol: str,
     interval: str = "1h",
     trade_type: TradeType = TradeType.spot,
-    archive_home: str | None = None,
+    lookback_days: int | None = None,
 ) -> Iterator[list[dict]]:
-    """Read klines from local Binance archive ZIPs.
+    """Fetch klines from the Binance S3 archive (data.binance.vision).
 
-    Scans the local archive directory for ZIP files matching the symbol and
-    interval, extracts the CSV contents, and yields rows.
+    Lists available S3 files for the symbol/interval, downloads ZIPs,
+    parses CSV contents, and yields rows. No local download required.
+
+    Args:
+        symbol: Trading pair.
+        interval: Kline interval.
+        trade_type: Market type.
+        lookback_days: If set, only process files newer than N days.
+
+    Yields:
+        Lists of kline dicts per ZIP file.
     """
-    from pathlib import Path
+    import aiohttp
 
-    import polars as pl
+    client = ArchiveClient()
+    freq = DataFrequency.monthly if interval in ("1w", "1M") else DataFrequency.daily
 
-    from binance_datatool.common.path import resolve_archive_home
-
-    home = Path(archive_home) if archive_home else resolve_archive_home()
-    tt_path = trade_type.s3_path
-    freq = DataFrequency.daily
-    dtype_path = DataType.klines
-
-    zip_dir = home / "data" / tt_path / freq.value / dtype_path.value / symbol / interval
-    zip_files = sorted(zip_dir.glob("*.zip")) if zip_dir.is_dir() else []
-    if not zip_files:
+    files = asyncio.run(
+        client.list_symbol_files(
+            trade_type=trade_type,
+            data_freq=freq,
+            data_type=DataType.klines,
+            symbol=symbol,
+            interval=interval,
+        )
+    )
+    if not files:
         return
 
-    rows: list[dict] = []
-    for zf in zip_files:
-        try:
-            df = pl.read_csv(zf, has_header=False, infer_schema_length=0)
-        except Exception:
-            continue
-        for row in df.iter_rows():
-            rows.append(
-                {
-                    "open_time": int(row[0]),
-                    "open": float(row[1]) if row[1] else 0.0,
-                    "high": float(row[2]) if row[2] else 0.0,
-                    "low": float(row[3]) if row[3] else 0.0,
-                    "close": float(row[4]) if row[4] else 0.0,
-                    "volume": float(row[5]) if row[5] else 0.0,
-                    "close_time": int(row[6]) if row[6] else 0,
-                    "quote_volume": float(row[7]) if row[7] else 0.0,
-                    "trade_count": int(row[8]) if row[8] else 0,
-                    "taker_buy_volume": float(row[9]) if row[9] else 0.0,
-                    "taker_buy_quote_volume": float(row[10]) if row[10] else 0.0,
-                    "symbol": symbol,
-                    "interval": interval,
-                }
-            )
-    yield rows
+    if lookback_days is not None:
+        from datetime import UTC, datetime, timedelta
+
+        cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
+        files = [f for f in files if f.last_modified.replace(tzinfo=UTC) > cutoff]
+
+    async def _fetch_and_parse(url: str) -> list[dict]:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp,
+        ):
+            raw = await resp.read()
+        rows: list[dict] = []
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            csv_name = [n for n in zf.namelist() if n.endswith(".csv")][0]
+            for line in zf.read(csv_name).decode().strip().split("\n"):
+                parts = line.split(",")
+                if len(parts) < 11:
+                    continue
+                rows.append(
+                    {
+                        "open_time": int(parts[0]),
+                        "open": float(parts[1]) if parts[1] else 0.0,
+                        "high": float(parts[2]) if parts[2] else 0.0,
+                        "low": float(parts[3]) if parts[3] else 0.0,
+                        "close": float(parts[4]) if parts[4] else 0.0,
+                        "volume": float(parts[5]) if parts[5] else 0.0,
+                        "close_time": int(parts[6]) if parts[6] else 0,
+                        "quote_volume": float(parts[7]) if parts[7] else 0.0,
+                        "count": int(parts[8]) if parts[8] else 0,
+                        "taker_buy_volume": float(parts[9]) if parts[9] else 0.0,
+                        "taker_buy_quote_volume": float(parts[10]) if parts[10] else 0.0,
+                        "symbol": symbol,
+                        "interval": interval,
+                    }
+                )
+        return rows
+
+    for f in files:
+        url = S3_DOWNLOAD_PREFIX + f.key
+        rows = asyncio.run(_fetch_and_parse(url))
+        if rows:
+            yield rows
 
 
 @dlt.source
@@ -94,23 +134,25 @@ def build_archive_source(
     symbols: list[str],
     interval: str = "1h",
     trade_type: TradeType = TradeType.spot,
+    lookback_days: int | None = None,
 ) -> list[dlt.Resource]:
-    """Build a dlt source for Binance archive data.
+    """Build a dlt source for Binance S3 archive data.
 
-    One resource per symbol, reading from local ZIP files downloaded by the
-    existing archive download workflow.
+    One resource per symbol, each fetching directly from
+    ``data.binance.vision``.
 
     Args:
         symbols: Trading symbols.
         interval: Kline interval.
-        trade_type: Market type (``"spot"``, ``"um"``, ``"cm"``).
+        trade_type: Market type.
+        lookback_days: Only process recent files.
 
     Returns:
         List of dlt Resources (one per symbol).
     """
     return [
-        archive_klines_resource(symbol=sym, interval=interval, trade_type=trade_type).with_name(
-            f"archive_{sym}_klines"
-        )
+        archive_klines_resource(
+            symbol=sym, interval=interval, trade_type=trade_type, lookback_days=lookback_days
+        ).with_name(f"archive_{sym}_klines")
         for sym in symbols
     ]
