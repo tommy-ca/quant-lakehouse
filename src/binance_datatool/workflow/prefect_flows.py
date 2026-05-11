@@ -523,38 +523,44 @@ def health_flow(
 # ── dlt + SQLMesh Pipeline ──────────────────────────────────────
 
 
-@task
+@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
 def run_dlt_source(
     symbol: str,
     interval: str = "1h",
-    catalog_path: Path | None = None,
+    trade_type: str = "spot",
+    catalog_path: str | None = None,
 ) -> dict:
-    """Run dlt pipeline to ingest Binance spot klines for one symbol."""
+    """Run dlt pipeline to ingest Binance klines for one symbol."""
     from binance_datatool.dlt_sources.binance import build_binance_source
     from binance_datatool.dlt_sources.pipeline import run_source
 
-    source = build_binance_source(symbols=[symbol], interval=interval)
-    return run_source(source, source_name=f"binance_spot_{symbol}", catalog_path=catalog_path)
+    tt = TradeType(trade_type)
+    source = build_binance_source(symbols=[symbol], interval=interval, trade_type=tt)
+    return run_source(
+        source, source_name=f"binance_{trade_type}_{symbol}", catalog_path=catalog_path
+    )
 
 
-@task
+@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
 def transform_to_silver(
     symbol: str,
     interval: str = "1h",
     trade_type: str = "spot",
-    catalog_path: Path | None = None,
+    catalog_path: str | None = None,
 ) -> int:
     """Read bronze klines from DuckDB, transform to Silver, write back.
 
-    Uses Polars for the Bronze→Silver transform via DuckDB's native
-    ``CREATE TABLE AS SELECT`` from a registered Polars DataFrame.
+    Uses Polars for the Bronze→Silver transform. The silver DataFrame is
+    registered as a DuckDB view (zero-copy) then inserted via SQL.
     """
     import duckdb
     import polars as pl
 
     from binance_datatool.transforms.klines import bronze_klines_to_silver
 
-    db_file = str((catalog_path or _DEFAULT_ARCHIVE_HOME.parent / "lake") / "catalog.duckdb")
+    db_file = catalog_path or str(
+        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
+    )
     con = duckdb.connect(db_file)
     try:
         raw = con.execute("SELECT * FROM bronze.klines WHERE symbol = ?", [symbol]).fetchdf()
@@ -567,15 +573,12 @@ def transform_to_silver(
         if silver.is_empty():
             return 0
         con.execute("CREATE SCHEMA IF NOT EXISTS silver")
-        silver.to_pandas().to_sql(
-            "_silver_staging", con.connection, if_exists="replace", index=False
-        )
         con.execute(
-            "CREATE TABLE IF NOT EXISTS silver.klines AS SELECT * FROM _silver_staging WHERE FALSE"
+            "CREATE TABLE IF NOT EXISTS silver.klines AS SELECT * FROM silver.klines WHERE FALSE"
         )
         con.execute("DELETE FROM silver.klines WHERE symbol = ?", [symbol])
-        con.execute("INSERT INTO silver.klines SELECT * FROM _silver_staging")
-        con.execute("DROP TABLE IF EXISTS _silver_staging")
+        _silver_pd = silver.to_pandas()
+        con.execute("INSERT INTO silver.klines SELECT * FROM _silver_pd")
         return silver.height
     finally:
         con.close()
@@ -603,18 +606,19 @@ def run_sqlmesh_plan(
 
 
 @flow(
-    name="dlt SQLMesh Pipeline",
-    description="dlt → Polars transform → SQLMesh → DuckLake (minimal E2E)",
+    name="DLT Pipeline",
+    description="dlt → Polars transform → SQLMesh → DuckLake",
     log_prints=True,
 )
 def dlt_sqlmesh_pipeline(
     symbol: str = "BTCUSDT",
     interval: str = "1h",
-    catalog_path: Path | None = None,
+    trade_type: str = "spot",
+    catalog_path: str | None = None,
 ) -> dict:
-    """Minimal E2E: dlt extract → Polars transform → SQLMesh → DuckLake.
+    """dlt → Polars transform → SQLMesh → DuckLake.
 
-    This flow demonstrates the full stack integration:
+    Stages:
     1. dlt: fetch klines via Binance REST API → DuckDB bronze
     2. Polars: transform bronze → silver, write to DuckDB silver
     3. SQLMesh: run plan/apply for versioned silver model
@@ -623,20 +627,22 @@ def dlt_sqlmesh_pipeline(
     Args:
         symbol: Trading pair.
         interval: Kline interval.
-        catalog_path: Path to lake catalog directory.
+        trade_type: Market type (``"spot"``, ``"um"``, ``"cm"``).
+        catalog_path: Full path to ``catalog.duckdb``.
 
     Returns:
         Dict with counts for each stage.
     """
-    home = _DEFAULT_ARCHIVE_HOME
-    catalog = catalog_path or home.parent / "lake"
+    db_path = catalog_path or str(
+        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
+    )
 
-    print(f"  Stage 1: dlt — ingesting {symbol} {interval} klines")
-    dlt_result = run_dlt_source(symbol, interval, catalog)
-    print(f"    dlt load info: {dlt_result['load_info']}")
+    print(f"  Stage 1: dlt — ingesting {symbol} {interval} {trade_type} klines")
+    dlt_result = run_dlt_source(symbol, interval, trade_type, db_path)
+    print(f"    dlt tables: {dlt_result['tables_loaded']}")
 
     print("  Stage 2: Polars — transforming bronze → silver")
-    rows = transform_to_silver(symbol, interval, "spot", catalog)
+    rows = transform_to_silver(symbol, interval, trade_type, db_path)
     print(f"    silver rows: {rows}")
 
     print("  Stage 3: SQLMesh — applying silver model")
@@ -646,6 +652,7 @@ def dlt_sqlmesh_pipeline(
     return {
         "symbol": symbol,
         "interval": interval,
+        "trade_type": trade_type,
         "dlt_tables": dlt_result["tables_loaded"],
         "silver_rows": rows,
         "sqlmesh_applied": sm_result["applied"],

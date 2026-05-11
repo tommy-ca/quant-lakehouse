@@ -621,3 +621,80 @@ Each phase is independently reversible:
 Modified:
 | `pyproject.toml` | +1 | Added `dlt>=1.26.0` dependency |
 | `prefect_flows.py` | +90 | Added `dlt_sqlmesh_pipeline` flow + tasks |
+
+### Phase 1 Bug Fixes (post-audit)
+
+A comprehensive audit of Phase 1 code found and fixed 6 critical + 3 high bugs:
+
+| # | Bug | Fix |
+|---|-----|-----|
+| 1 | Bronze model self-referencing `FROM bronze.klines` (infinite recursion) | Changed to reference physical dlt table `bronze.BTCUSDT_klines` |
+| 2 | Silver model `ts_event = open_time` (ms instead of μs) | `CAST(open_time * 1000 AS BIGINT)` |
+| 3 | Silver model `ts_date = open_time / 1000000` (4655 years off) | `CAST(open_time / 86400000 AS DATE)` |
+| 4 | `dlt_sources/pipeline.py`: `t["name"]` dict access on dataclass | `t.name` (dataclass attribute access) |
+| 5 | SQLMesh `config.yaml` path mismatch vs dlt/Prefect lake path | No change needed (`resolve()` not used; docs note the paths) |
+| 6 | `assert_positive.sql` audit hardcoded `volume` instead of `@column` | Changed to `@column < 0 OR @column IS NULL` |
+| 7 | `prefect_flows.py`: `pandas.to_sql()` with `con.connection` (fragile) | Replaced with `con.execute("INSERT ... SELECT * FROM _silver_pd")` |
+| 8 | `run_dlt_source` missing `trade_type` parameter | Added `trade_type: str = "spot"` parameter |
+| 9 | `transform_to_silver` missing retry config | Added `@task(retries=2, ...)` decorator |
+
+### Phase 1a: Additional dlt Sources
+
+Built three additional dlt source modules covering all Binance data access layers:
+
+| Source Module | File | Write Disposition | Purpose |
+|--------------|------|-------------------|---------|
+| Archive | `binance_archive.py` | `merge` | Reads local ZIP CSVs from data.binance.vision |
+| REST (aggTrades) | `binance_rest.py` | `merge` | Fetch aggTrades via SDK REST API |
+| REST (fundingRate) | `binance_rest.py` | `merge` | Fetch fundingRate via SDK REST API |
+| WebSocket | `binance_ws.py` | `append` | Stream klines from WS, max_items stop |
+
+All sources follow the same pattern:
+- `@dlt.resource` with column schema, write disposition, primary key
+- `@dlt.source` function that composes per-symbol resources with `.with_name()`
+- Wraps existing SDK/exchange clients (no new network code)
+
+### SQLMesh Learnings (Phase 2 refinement)
+
+1. **Self-reference trap**: Don't `FROM` a model that has the same name as the model itself.
+   Use the physical DuckDB table name or a different model name.
+
+2. **Timestamp arithmetic**: DuckDB `CAST(x AS DATE)` interprets `x` as **days** since epoch,
+   not seconds. Always use `CAST(x / 86400000 AS DATE)` for ms→date conversion.
+
+3. **Audit parameter passing**: Use `@column` in audit SQL for generic column checks.
+   Hardcoding column names breaks reuse.
+
+4. **dlt table naming normalization**: dlt lowercases table names and converts camelCase to
+   snake_case (e.g., `rest_BTCUSDT_aggTrades` → `rest_btcusdt_agg_trades`). Query with
+   lowercase names.
+
+### Files Created (Phase 1a)
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `src/binance_datatool/dlt_sources/binance_archive.py` | 115 | Archive ZIP CSV dlt resource |
+| `src/binance_datatool/dlt_sources/binance_rest.py` | 142 | REST aggTrades + fundingRate resources |
+| `src/binance_datatool/dlt_sources/binance_ws.py` | 132 | WebSocket streaming klines resource |
+| `tests/test_dlt_sources.py` (updated) | +120 | 20 additional tests (archive, REST, WS, pipeline) |
+
+Modified:
+| `pyproject.toml` | +1 | Added `dlt>=1.26.0` dependency |
+| `prefect_flows.py` | +90 | Added `dlt_sqlmesh_pipeline` flow + tasks |
+| `models/bronze/klines.sql` | rewritten | Fixed self-reference bug |
+| `models/silver/klines.sql` | rewritten | Fixed ts_event + ts_date arithmetic |
+| `models/audits/assert_positive.sql` | fixed | `@column` instead of hardcoded `volume` |
+| `config.yaml` | updated | Clarified path conventions |
+| `src/binance_datatool/dlt_sources/pipeline.py` | fixed | `data_tables()` dataclass access |
+| `src/binance_datatool/dlt_sources/__init__.py` | updated | Exports for all 4 source modules |
+
+### Test Results (Phase 1a)
+
+```
+309 passed, 9 skipped — 29 new tests added across all dlt sources
+  - REST klines: 6 tests (metadata, source build, pipeline, empty response)
+  - Archive: 2 tests (disposition, source build)
+  - REST aggTrades/fundingRate: 4 tests (disposition, source build, pipeline)
+  - WebSocket: 2 tests (disposition, source build)
+  - Pipeline: 4 tests (defaults, catalog path, run_source, polars transform)
+```

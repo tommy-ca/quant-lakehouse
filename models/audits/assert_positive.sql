@@ -1,4 +1,4 @@
 AUDIT (
   name assert_positive,
 );
-SELECT * FROM @this WHERE volume < 0 OR volume IS NULL
+SELECT * FROM @this WHERE @column < 0 OR @column IS NULL

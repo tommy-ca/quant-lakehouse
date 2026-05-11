@@ -1,5 +1,7 @@
 # SQLMesh project configuration for binance-datatool.
 # Connects to the same DuckDB database used by dlt and the existing sink.
+# Path is relative to project root. Must match the catalog.duckdb location
+# used by dlt pipeline (see pipeline.py) and Prefect flows.
 # See: https://sqlmesh.readthedocs.io/en/stable/guides/setup/
 
 gateways:

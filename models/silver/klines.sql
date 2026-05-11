@@ -13,9 +13,11 @@ MODEL (
 
 -- Silver klines: Bronze → Silver transform.
 -- Renames columns to DBN conventions, adds metadata, casts types.
--- Incremental by time range for efficient backfill.
+-- ts_event is in microseconds (DBN convention). open_time from Binance
+-- API is in milliseconds, so multiply by 1000.
+-- ts_date is computed from ms → days since epoch.
 SELECT
-  CAST(open_time AS BIGINT) AS ts_event,
+  CAST(open_time AS BIGINT) * 1000 AS ts_event,
   CAST(EPOCH_ms(CURRENT_TIMESTAMP) * 1000 AS BIGINT) AS ts_recv,
   CAST(open AS DOUBLE) AS open,
   CAST(high AS DOUBLE) AS high,
@@ -27,15 +29,12 @@ SELECT
   CAST(taker_buy_volume AS DOUBLE) AS taker_buy_volume,
   CAST(taker_buy_quote_volume AS DOUBLE) AS taker_buy_quote_volume,
   'dlt_api' AS source,
-  CASE
-    WHEN REGEXP_MATCHES(symbol, '[A-Z]+(USDT|BUSD|USDC)$') THEN 'binance-spot'
-    ELSE 'binance-spot'
-  END AS exchange,
+  'binance-spot' AS exchange,
   'spot' AS trade_type,
   symbol,
   interval,
   'klines' AS data_type,
   CAST(EPOCH_ms(CURRENT_TIMESTAMP) * 1000 AS BIGINT) AS ingested_at,
-  CAST(CAST(CAST(open_time / 1000000 AS BIGINT) AS DATE) AS DATE) AS ts_date
+  CAST(CAST(open_time / 86400000 AS BIGINT) AS DATE) AS ts_date
 FROM bronze.klines
 WHERE CAST(open_time AS BIGINT) BETWEEN @start_ds AND @end_ds
