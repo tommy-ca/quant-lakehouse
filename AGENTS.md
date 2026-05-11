@@ -49,16 +49,17 @@ Each component handles its strength — no overlap:
 | **Pydantic** | Per-record validation within dlt resources (business rules, type coercion, authoritative schema) | `binance_datatool.validation.models` — 3 models: KlineModel, AggTradeModel, FundingRateModel |
 | **SQLMesh** | Versioned SQL transforms (INCREMENTAL_BY_TIME_RANGE models, audits for data quality, column-level lineage) | `models/` — bronze/silver models, audits; optional via `dlt_sqlmesh_pipeline` |
 | **Prefect** | Orchestration (flow composition, parallelism, retries, concurrency guards, DLQ, cron scheduling) | `binance_datatool.workflow.prefect_flows` — 10+ tasks, 9 flows, cron deployments |
-| **DuckDB/DuckLake** | Storage (native Arrow reads/writes, zero-pandas, partitioned Parquet via DuckLake catalog) | `binance_datatool.workflow.catalog` — DuckLakeCatalog, IcebergCatalog |
+| **DuckLake** | Primary storage — lakehouse with Parquet files + sqlite catalog. dlt destination by default. Handles partitioning, ACID, snapshots automatically. | `dlt.destinations.ducklake()` — managed by dlt; no manual catalog setup needed |
+| **DuckDB** | Legacy/fallback storage — single-file database. Used for unit tests and backward compatibility. | `dlt.destinations.duckdb()` — use via explicit `destination="duckdb"` |
 
 ### Data Flow
 
 ```
 dlt Sources (5 modules)
-  ↓ Extract + Load into DuckDB bronze tables
+  ↓ Extract + Load into DuckLake bronze tables (Parquet + catalog)
 Polars transforms (3 modules)
   ↓ Bronze → Silver with Pandera validation at boundaries
-Arrow writes → DuckDB silver tables
+Arrow writes → DuckLake silver tables
   ↓
 Prefect orchestrates (dlt_sqlmesh_pipeline dispatcher)
   └─ data_type=klines       → rest/archive/ws → transform_to_silver
@@ -314,6 +315,7 @@ Standalone flows:
 | `prepare_symbol` calls sub-tasks inline (not via `.submit()`) | `prefect_flows.py:220-238` | No per-sub-task parallelism within a symbol | By design — download→verify→fill is sequential per symbol. Cross-symbol parallelism via `.map()` |
 | S3 listing is slow for full archive | `binance_archive.py:72` | Lists ALL files before filtering by lookback | Use `lookback_days=7` to limit processing. Full listing for BTCUSDT 1d = ~6400 files, ~30s |
 | WS streaming blocks in sync context | `binance_ws.py` | Stream runs in asyncio.run() bridge | WS is realtime-only; 1m candles take up to 60s. Use REST for batch. |
+| DuckLake is default destination | `pipeline.py:29` | dlt sources now default to ``destination="ducklake"`` | Pass ``destination="duckdb"`` to revert to single-file DuckDB |
 
 ## Data Sources
 
@@ -420,35 +422,51 @@ dlt_sqlmesh_pipeline(symbol, data_type, source, trade_type)
         │ source=rest │ source=arch │ source=ws
         │ run_dlt_*   │ run_dlt_*   │ run_dlt_*
         └─────────────┴─────────────┘
-                      │
+                      ↓
+          DuckLake (dlt destination — Parquet + catalog)
+                      ↓
            transform_*_to_silver()
-           (with Pandera validation)
-                      │
-            run_sqlmesh_plan()
+           (Polars + Pandera)
+                      ↓
+          DuckLake silver tables
+                      ↓
+           run_sqlmesh_plan()  (optional)
 ```
 
-### Running dlt_sqlmesh_pipeline
+### Running Workflows with Prefect
 
 ```bash
-# Ingest via REST API (gap-fill)
-uv run python3 -c "
-from binance_datatool.workflow.prefect_flows import dlt_sqlmesh_pipeline
-r = dlt_sqlmesh_pipeline(symbol='BTCUSDT', interval='1h', trade_type='spot', data_type='klines', source='rest')
-print(r)
-"
+# Serve deployments (both daily backfill + hourly metadata — no server/worker needed)
+uv run python -m binance_datatool.workflow.prefect_flows serve
 
-# Ingest from S3 archive (lookback_days=7)
-uv run python3 -c "
-from binance_datatool.workflow.prefect_flows import dlt_sqlmesh_pipeline
-r = dlt_sqlmesh_pipeline(symbol='BTCUSDT', interval='1d', trade_type='spot', data_type='klines', source='archive')
-print(r)
-"
+# In another terminal, trigger a run
+uv run prefect deployment run 'Historical Data Pipeline/historical_pipeline'
 
-# Stream via WebSocket (collects then stops)
+# List symbols from local catalog (instant, no network)
+uv run binance-datatool list-symbols spot --from-catalog --catalog /path/to/lake
+
+# Or run flows directly via Python
 uv run python3 -c "
-from binance_datatool.workflow.prefect_flows import dlt_sqlmesh_pipeline
-r = dlt_sqlmesh_pipeline(symbol='BTCUSDT', interval='1m', trade_type='spot', data_type='klines', source='ws')
-print(r)
+from binance_datatool.workflow.prefect_flows import historical_pipeline, bulk_backfill
+
+# Single symbol (last 3 days of 1h klines)
+result = historical_pipeline(trade_type='spot', symbols=['BTCUSDT'],
+                             data_type='klines', interval='1h', lookback_days=3)
+print(result)
+
+# Multi-symbol (parallel via .map(), DuckDB serialized via concurrency guard)
+result = historical_pipeline(trade_type='spot', symbols=['BTCUSDT', 'ETHUSDT'],
+                             data_type='klines', interval='1h', lookback_days=3)
+print(result)
+
+# Bulk backfill with explicit symbols
+result = bulk_backfill(trade_type='spot', symbols=['BTCUSDT', 'ETHUSDT', 'SOLUSDT'],
+                       data_type='klines', interval='1h', lookback_days=3)
+print(result)
+
+# Bulk backfill with auto-discovered symbols (max 10 by default, configurable)
+result = bulk_backfill(trade_type='um', max_symbols=5)
+print(result)
 "
 ```
 
