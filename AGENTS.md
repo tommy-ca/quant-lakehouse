@@ -37,13 +37,44 @@
 - Prefer clear, composable workflows and thin CLI entrypoints.
 - Keep the root package minimal. Export only version metadata from `binance_datatool.__init__`.
 
+## Stack Architecture
+
+Each component handles its strength — no overlap:
+
+| Component | Role | Module |
+|-----------|------|--------|
+| **dlt** | Extract + Load (pagination, retries, incremental state, schema inference, S3 listing) | `binance_datatool.dlt_sources` — 6 modules: REST klines, REST aggTrades, REST fundingRate, S3 archive, WS streaming, metadata |
+| **Polars** | Bronze→Silver transforms (type casting, column renaming, timestamp normalization) | `binance_datatool.transforms` — 3 modules: klines, aggTrades, fundingRate |
+| **Pandera** | DataFrame-level validation at pipeline boundaries (column types, nullability, cross-column checks) | `binance_datatool.validation.schemas` — 4 schemas: bronze klines, silver klines, silver aggTrades, silver fundingRate |
+| **Pydantic** | Per-record validation within dlt resources (business rules, type coercion, authoritative schema) | `binance_datatool.validation.models` — 3 models: KlineModel, AggTradeModel, FundingRateModel |
+| **SQLMesh** | Versioned SQL transforms (INCREMENTAL_BY_TIME_RANGE models, audits for data quality, column-level lineage) | `models/` — bronze/silver models, audits; optional via `dlt_sqlmesh_pipeline` |
+| **Prefect** | Orchestration (flow composition, parallelism, retries, concurrency guards, DLQ, cron scheduling) | `binance_datatool.workflow.prefect_flows` — 10+ tasks, 9 flows, cron deployments |
+| **DuckDB/DuckLake** | Storage (native Arrow reads/writes, zero-pandas, partitioned Parquet via DuckLake catalog) | `binance_datatool.workflow.catalog` — DuckLakeCatalog, IcebergCatalog |
+
+### Data Flow
+
+```
+dlt Sources (5 modules)
+  ↓ Extract + Load into DuckDB bronze tables
+Polars transforms (3 modules)
+  ↓ Bronze → Silver with Pandera validation at boundaries
+Arrow writes → DuckDB silver tables
+  ↓
+Prefect orchestrates (dlt_sqlmesh_pipeline dispatcher)
+  └─ data_type=klines       → rest/archive/ws → transform_to_silver
+  └─ data_type=aggTrades    → rest/archive    → transform_agg_trades_to_silver
+  └─ data_type=fundingRate  → rest/archive    → transform_funding_rate_to_silver
+  └─ Stage 0: gap detection (Prefect + DuckDB utility)
+  └─ Stage 3: SQLMesh plan (versioned transforms, optional)
+```
+
 ## Toolchain
 - Package and dependency management: `uv` **only** — never `pip`, `uv pip`, or global `python3`
 - Build backend: `hatchling`
 - Linting and formatting: `ruff`
 - Testing: `pytest`
 - Git hooks: `pre-commit`
-- External downloader: `aria2`
+- External downloader: `aria2` (legacy archive download only)
 
 ## Expected Commands (uv-native)
 All commands use `uv run` — never `pip`, `uv pip`, or bare `python3`:
@@ -281,6 +312,8 @@ Standalone flows:
 | `DataType` fallback to `klines` on unknown value | `prefect_flows.py:119` | Fixed — now raises ValueError | (resolved) |
 | `verify_flow` data_freq hardcoded to daily | `prefect_flows.py:146` | Fixed — now uses monthly for fundingRate | (resolved) |
 | `prepare_symbol` calls sub-tasks inline (not via `.submit()`) | `prefect_flows.py:220-238` | No per-sub-task parallelism within a symbol | By design — download→verify→fill is sequential per symbol. Cross-symbol parallelism via `.map()` |
+| S3 listing is slow for full archive | `binance_archive.py:72` | Lists ALL files before filtering by lookback | Use `lookback_days=7` to limit processing. Full listing for BTCUSDT 1d = ~6400 files, ~30s |
+| WS streaming blocks in sync context | `binance_ws.py` | Stream runs in asyncio.run() bridge | WS is realtime-only; 1m candles take up to 60s. Use REST for batch. |
 
 ## Data Sources
 
@@ -391,8 +424,32 @@ dlt_sqlmesh_pipeline(symbol, data_type, source, trade_type)
            transform_*_to_silver()
            (with Pandera validation)
                       │
-           run_sqlmesh_plan()
+            run_sqlmesh_plan()
 ```
+
+### Running dlt_sqlmesh_pipeline
+
+```bash
+# Ingest via REST API (gap-fill)
+uv run python3 -c "
+from binance_datatool.workflow.prefect_flows import dlt_sqlmesh_pipeline
+r = dlt_sqlmesh_pipeline(symbol='BTCUSDT', interval='1h', trade_type='spot', data_type='klines', source='rest')
+print(r)
+"
+
+# Ingest from S3 archive (lookback_days=7)
+uv run python3 -c "
+from binance_datatool.workflow.prefect_flows import dlt_sqlmesh_pipeline
+r = dlt_sqlmesh_pipeline(symbol='BTCUSDT', interval='1d', trade_type='spot', data_type='klines', source='archive')
+print(r)
+"
+
+# Stream via WebSocket (collects then stops)
+uv run python3 -c "
+from binance_datatool.workflow.prefect_flows import dlt_sqlmesh_pipeline
+r = dlt_sqlmesh_pipeline(symbol='BTCUSDT', interval='1m', trade_type='spot', data_type='klines', source='ws')
+print(r)
+"
 ```
 
 ## CLI Commands Reference
