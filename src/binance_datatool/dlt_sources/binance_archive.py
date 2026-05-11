@@ -196,15 +196,23 @@ def archive_data_resource(
                 csv_name = next(n for n in zf.namelist() if n.endswith(".csv"))
                 return zf.read(csv_name).decode()
 
-        results: list[list[dict[str, Any]]] = []
-        for key in s3_keys:
-            try:
-                text = asyncio.run(_fetch(key))
-                rows = _parse_csv_rows(text, data_type, symbol, interval)
-                if rows:
-                    results.append(rows)
-            except Exception:
-                continue
+        # Parallel fetch via asyncio.gather
+        async def _fetch_all() -> list[tuple[int, list[dict[str, Any]] | None]]:
+            import asyncio as _asyncio
+
+            async def _one(idx: int, key: str) -> tuple[int, list[dict[str, Any]] | None]:
+                try:
+                    text = await _fetch(key)
+                    rows = _parse_csv_rows(text, data_type, symbol, interval)
+                    return idx, rows if rows else None
+                except Exception:
+                    return idx, None
+
+            tasks = [_one(i, k) for i, k in enumerate(s3_keys)]
+            return await _asyncio.gather(*tasks)
+
+        gathered = asyncio.run(_fetch_all())
+        results = [r for _, r in sorted(gathered) if r is not None]
         return results
 
     return dlt.resource(_gen, **_resource_kwargs(data_type))
