@@ -1,21 +1,19 @@
 """dlt resource for Binance WebSocket stream — real-time klines.
 
 Wraps the ``BinanceSpotWsClient.stream_ohlcv()`` async generator as a
-``@dlt.resource`` with ``write_disposition="append"``. Designed for
-continuous ingestion: the resource yields kline dicts as they arrive from
-the WebSocket stream.
+``@dlt.resource`` with ``write_disposition="append"``. Uses
+``asyncio.run()`` bridge (matching all other dlt sources) to avoid
+async generator lifecycle conflicts with dlt's sync pipeline.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import asyncio
+from typing import Any
 
 import dlt
 
 from binance_datatool.common.enums import TradeType
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
 
 
 @dlt.resource(
@@ -37,16 +35,17 @@ if TYPE_CHECKING:
         "interval": {"data_type": "text", "nullable": False},
     },
 )
-async def ws_klines_resource(
+def ws_klines_resource(
     symbol: str,
     interval: str = "1h",
     trade_type: TradeType = TradeType.spot,
     max_items: int = 100,
-) -> AsyncIterator[dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Stream klines from Binance WebSocket.
 
-    Connects to the real-time stream, yields kline dicts as they arrive,
-    and disconnects after ``max_items``.
+    Connects to the real-time stream, collects up to ``max_items`` klines,
+    disconnects, and returns them as a list. Uses synchronous interface
+    with ``asyncio.run()`` bridge for dlt compatibility.
 
     Args:
         symbol: Trading pair.
@@ -54,8 +53,8 @@ async def ws_klines_resource(
         trade_type: Market type.
         max_items: Max klines to collect before stopping.
 
-    Yields:
-        Kline dicts with fields matching the declared schema.
+    Returns:
+        List of kline dicts.
     """
     if trade_type == TradeType.spot:
         from binance_datatool.exchange.binance_ws import BinanceSpotWsClient
@@ -70,28 +69,34 @@ async def ws_klines_resource(
 
         ws_client = BinanceCmWsClient()
 
-    count = 0
-    async for kline in ws_client.stream_ohlcv(symbol, interval):
-        yield {
-            "open_time": kline.open_time,
-            "open": float(kline.open),
-            "high": float(kline.high),
-            "low": float(kline.low),
-            "close": float(kline.close),
-            "volume": float(kline.volume),
-            "close_time": kline.close_time,
-            "quote_volume": float(kline.quote_volume),
-            "trade_count": kline.num_trades,
-            "taker_buy_volume": float(kline.taker_buy_volume),
-            "taker_buy_quote_volume": float(kline.taker_buy_quote_volume),
-            "symbol": symbol,
-            "interval": interval,
-        }
-        count += 1
-        if count >= max_items:
-            break
+    async def _collect() -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        count = 0
+        async for kline in ws_client.stream_ohlcv(symbol, interval):
+            results.append(
+                {
+                    "open_time": kline.open_time,
+                    "open": float(kline.open),
+                    "high": float(kline.high),
+                    "low": float(kline.low),
+                    "close": float(kline.close),
+                    "volume": float(kline.volume),
+                    "close_time": kline.close_time,
+                    "quote_volume": float(kline.quote_volume),
+                    "trade_count": kline.num_trades,
+                    "taker_buy_volume": float(kline.taker_buy_volume),
+                    "taker_buy_quote_volume": float(kline.taker_buy_quote_volume),
+                    "symbol": symbol,
+                    "interval": interval,
+                }
+            )
+            count += 1
+            if count >= max_items:
+                break
+        await ws_client.close()
+        return results
 
-    await ws_client.close()
+    return asyncio.run(_collect())
 
 
 @dlt.source

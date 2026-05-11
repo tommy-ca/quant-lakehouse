@@ -639,14 +639,22 @@ def run_dlt_archive(
     symbol: str,
     interval: str = "1h",
     trade_type: str = "spot",
+    lookback_days: int | None = 7,
     catalog_path: str | None = None,
 ) -> dict:
-    """Run dlt pipeline to ingest Binance archive klines for one symbol."""
+    """Run dlt pipeline to ingest Binance archive klines for one symbol.
+
+    Fetches from live S3 (data.binance.vision). Use ``lookback_days``
+    to limit the number of files processed (default 7). Pass ``None``
+    to process all available history.
+    """
     from binance_datatool.dlt_sources.binance_archive import build_archive_source
     from binance_datatool.dlt_sources.pipeline import run_source
 
     tt = TradeType(trade_type)
-    source = build_archive_source(symbols=[symbol], interval=interval, trade_type=tt)
+    source = build_archive_source(
+        symbols=[symbol], interval=interval, trade_type=tt, lookback_days=lookback_days
+    )
     return run_source(
         source, source_name=f"archive_{trade_type}_{symbol}", catalog_path=catalog_path
     )

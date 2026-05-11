@@ -87,7 +87,8 @@ def archive_klines_resource(
     if lookback_days is not None:
         from datetime import UTC, datetime, timedelta
 
-        cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
+        _days = int(lookback_days)
+        cutoff = datetime.now(UTC) - timedelta(days=_days)
         files = [f for f in files if f.last_modified.replace(tzinfo=UTC) > cutoff]
 
     async def _fetch_and_parse(url: str) -> list[dict]:

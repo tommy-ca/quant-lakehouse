@@ -226,3 +226,4 @@ temp/
 .claude/
 skills-lock.json
 test.duckdb
+*.duckdb

@@ -144,7 +144,7 @@ class BinanceSpotWsClient(_BinanceWsClientBase):
         method = getattr(self._connection, method_name)
         interval_enum = _INTERVAL_ENUM_MAP[interval]
 
-        stream = method(symbol=symbol.lower(), interval=interval_enum)
+        stream = await method(symbol=symbol.lower(), interval=interval_enum)
         stream.on("message", lambda msg: queue.put_nowait(msg))
 
         try:
@@ -184,7 +184,7 @@ class BinanceUmWsClient(_BinanceWsClientBase):
         method_name = _WS_INTERVAL_METHOD["um"]
         method = getattr(self._connection, method_name)
 
-        stream = method(symbol=symbol.lower(), interval=interval)
+        stream = await method(symbol=symbol.lower(), interval=interval)
         stream.on("message", lambda msg: queue.put_nowait(msg))
 
         try:
@@ -224,7 +224,7 @@ class BinanceCmWsClient(_BinanceWsClientBase):
         method_name = _WS_INTERVAL_METHOD["cm"]
         method = getattr(self._connection, method_name)
 
-        stream = method(symbol=symbol.lower(), interval=interval)
+        stream = await method(symbol=symbol.lower(), interval=interval)
         stream.on("message", lambda msg: queue.put_nowait(msg))
 
         try:
