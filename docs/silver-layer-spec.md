@@ -93,10 +93,10 @@ Follows DBN (`ts_event`, `ts_recv`) and tardis.dev (price/size volume) conventio
 | `volume` | CSV column | FLOAT64 | Base volume |
 | `quote_volume` | CSV column | FLOAT64 | Quote volume |
 | `trade_count` | `count` | INT64 | Number of trades |
-| `taker_buy_volume` | CSV column | FLOAT64 | Maker buy volume |
+| `taker_buy_volume` | CSV column | FLOAT64 | Taker buy base volume |
 | `taker_buy_quote_volume` | CSV column | FLOAT64 | Maker buy quote volume |
 | `source` | Auto | UTF8 | `"archive"`, `"api_filled"`, `"ws_stream"` |
-| `exchange` | Auto | UTF8 | tardis.dev IDs: `"binance"`, `"binance-futures"`, `"binance-delivery"` |
+| `exchange` | Auto | UTF8 | DuckLake catalog path: `"binance-spot"`, `"binance-perps-um"`, `"binance-perps-cm"` |
 | `trade_type` | Auto | UTF8 | `"spot"`, `"um"`, `"cm"` |
 | `symbol` | Auto | UTF8 | e.g. `"BTCUSDT"` |
 | `interval` | Auto | UTF8 | e.g. `"1h"` |
@@ -304,7 +304,7 @@ FROM klines GROUP BY symbol, trade_type
 HAVING days_stale > 3;
 ```
 
-### ### DuckLake Catalog Implementation
+### DuckLake Catalog Implementation
 
 ```python
 from pathlib import Path
@@ -364,7 +364,7 @@ SELECT symbol, COUNT(*) FROM klines GROUP BY symbol;
 
 ### Gap Detection (Silver-aware)
 - Scan Silver layer for missing dates per `(trade_type, data_type, symbol, interval)`
-- Query Iceberg/DuckDB catalog for date range coverage
+- Query DuckLake catalog for date range coverage
 - Fetch missing data from REST API → normalize → append to Silver
 
 ### Health Check (Silver-aware)

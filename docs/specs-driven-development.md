@@ -48,11 +48,11 @@ Spec example (minimal):
 - Use `tmp_path` fixtures for filesystem side-effect assertions.
 
 4. Subagent & Skill Development
--------------------------------
+------------------------------
 
-The repository ships an Agent Skill (see `skills/`) that instructs agents how to
-call CLI commands. When building skills or subagents:
+> The `skills/` module does not exist yet. See `docs/skills-subagents.md` for the aspirational design.
 
+When building skills or subagents:
 - Keep each skill focused: one skill → one operation (list, download, verify)
 - Each skill must declare:
   - Input schema (JSON schema or procedural signature)
@@ -92,11 +92,13 @@ Before merging a change that modifies behaviour, perform the following audit:
 4. Integration: Add `@pytest.mark.integration` tests that hit the real API if
    allowed. Otherwise, capture a recorded fixture and run the test against it.
 
-7. Skills & Subagents
----------------------
+7. Skills & Subagents (Aspirational)
+-----------------------------------
 
-For agent-driven flows, keep the following in mind:
+See `docs/skills-subagents.md` for the full skills/subagent design. None of the
+following subagents are implemented yet.
 
+For agent-driven flows, the design intent is:
 - Subagents should be small stateful actors that own a single responsibility:
   - `discover_symbols` subagent: returns symbol lists
   - `download_partition` subagent: takes a symbol & partition and returns success

@@ -14,12 +14,12 @@ This document guides developers through implementing the specifications and buil
 - [x] DataContract unit tests (24 tests, all passing)
 - [x] Skills & subagents specification (skills-subagents.md)
 
-### ✅ Phase 2: Adapter Pattern & Multi-Source (COMPLETE)
+### ✅ Phase 2: Adapter Pattern & Multi-Source (COMPLETE — Binance only)
 - [x] Implement LineageTracker for data provenance
 - [x] Implement BinanceAdapter wrapping ArchiveClient
-- [x] Implement example CoinbaseAdapter (skeleton, 9 tests)
-- [x] Write adapter integration tests (35 tests in test_adapter_binance.py)
-- [ ] integrate SourceRegistry with CLI (--source flag not yet wired)
+- [ ] CoinbaseAdapter (skeleton) — not implemented, deferred
+- [x] Write adapter integration tests (25 tests in test_adapter_binance.py)
+- [ ] Integrate SourceRegistry with CLI (--source flag not yet wired)
 
 ### ✅ Phase 3: Data Contracts & Validation (COMPLETE)
 - [x] Implement DataContract class
@@ -641,10 +641,10 @@ This implementation guide provides a clear path to:
 
 All work follows TDD, SOLID principles, and clear specifications. Success criteria are defined upfront. Code review gates ensure quality.
 
-**Next Step**: Start with Phase 2, Step 1 (LineageTracker implementation).
+**Next Step**: See `docs/requirements.md` Phase 5 for multi-CEX expansion via CCXT.
 
 ---
 
-**Document Version**: 1.0
-**Last Updated**: 2026-05-07
-**Status**: Implementation guidance ready; awaiting developer to begin Phase 2
+**Document Version**: 1.1
+**Last Updated**: 2026-05-11
+**Status**: Phases 1–7 complete (core workflows, exchange SDK, Prefect orchestration, sink). Phase 8 (WS streaming) planned but not implemented.

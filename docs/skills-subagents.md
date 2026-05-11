@@ -1,4 +1,8 @@
-# Skills & Subagents Specification
+# Skills & Subagents Specification (Proposal)
+
+> **Status: PROPOSAL** — The skills framework and subagent protocols described here are aspirational.
+> The `skills/` module does not yet exist in the codebase. See `docs/requirements.md` (Section 8) and
+> `docs/proposals/` for the current implementation status. Implement per AGENTS.md documentation accuracy rule.
 
 This document defines the formal skills and subagent protocols for `binance-datatool`. Skills are small, composable units of functionality that can be invoked by CLI users, scripts, or AI agents.
 
