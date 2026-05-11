@@ -14,6 +14,7 @@ import dlt
 
 from binance_datatool.common.enums import TradeType
 from binance_datatool.exchange.binance_rest import BinanceSpotRestClient
+from binance_datatool.validation.models import AggTradeModel, FundingRateModel
 
 
 def _client_for(trade_type: TradeType):
@@ -33,14 +34,7 @@ def _client_for(trade_type: TradeType):
     name="agg_trades",
     write_disposition="merge",
     primary_key=("symbol", "agg_trade_id"),
-    columns={
-        "agg_trade_id": {"data_type": "bigint", "nullable": False},
-        "price": {"data_type": "double", "nullable": False},
-        "quantity": {"data_type": "double", "nullable": False},
-        "transact_time": {"data_type": "bigint", "nullable": False},
-        "is_buyer_maker": {"data_type": "bool", "nullable": False},
-        "symbol": {"data_type": "text", "nullable": False},
-    },
+    columns=AggTradeModel,
 )
 def agg_trades_resource(
     symbol: str,
@@ -84,11 +78,7 @@ def agg_trades_resource(
     name="funding_rate",
     write_disposition="merge",
     primary_key=("symbol", "funding_time"),
-    columns={
-        "symbol": {"data_type": "text", "nullable": False},
-        "funding_time": {"data_type": "bigint", "nullable": False},
-        "funding_rate": {"data_type": "double", "nullable": False},
-    },
+    columns=FundingRateModel,
 )
 def funding_rate_resource(
     symbol: str,

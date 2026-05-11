@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 
 import polars as pl
+
+from binance_datatool.validation.schemas import validate_bronze_klines, validate_silver_klines
 
 
 def bronze_klines_to_silver(
@@ -12,8 +15,9 @@ def bronze_klines_to_silver(
     *,
     symbol: str = "",
     interval: str = "1h",
-    trade_type: str = "spot",
-    source: str = "dlt_api",
+    trade_type: Literal["spot", "um", "cm"] = "spot",
+    source: Literal["dlt_api", "archive", "ws_stream", "api_filled"] = "dlt_api",
+    validate: bool = True,
 ) -> pl.DataFrame:
     """Transform bronze klines DataFrame to Silver schema.
 
@@ -28,16 +32,21 @@ def bronze_klines_to_silver(
         symbol: Trading pair.
         interval: Kline interval.
         trade_type: ``"spot"``, ``"um"``, ``"cm"``.
-        source: Source label (``"dlt_api"``, ``"archive"``, ``"ws_stream"``).
+        source: Source label.
+        validate: When True (default), validates input against
+            ``BronzeKlinesSchema`` and output against ``SilverKlinesSchema``.
 
     Returns:
         Silver-normalized DataFrame with columns matching the DuckLake silver
         schema.
     """
+    if validate:
+        validate_bronze_klines(df)
+
     exchange = _exchange_for(trade_type)
     now_us = int(datetime.now(UTC).timestamp() * 1_000_000)
 
-    return df.with_columns(
+    result = df.with_columns(
         [
             (pl.col("open_time").cast(pl.Int64) * 1000).alias("ts_event"),
             pl.lit(now_us, dtype=pl.Int64).alias("ts_recv"),
@@ -85,6 +94,11 @@ def bronze_klines_to_silver(
             "ts_date",
         ]
     )
+
+    if validate:
+        validate_silver_klines(result)
+
+    return result
 
 
 def _exchange_for(trade_type: str) -> str:

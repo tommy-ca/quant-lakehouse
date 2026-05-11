@@ -20,25 +20,14 @@ if TYPE_CHECKING:
     from binance_datatool.exchange.binance_rest import _BinanceRestClientBase
 
 
+from binance_datatool.validation.models import KlineModel
+
+
 @dlt.resource(
     name="klines",
     write_disposition="merge",
     primary_key=("symbol", "interval", "open_time"),
-    columns={
-        "open_time": {"data_type": "bigint", "nullable": False},
-        "open": {"data_type": "double", "nullable": False},
-        "high": {"data_type": "double", "nullable": False},
-        "low": {"data_type": "double", "nullable": False},
-        "close": {"data_type": "double", "nullable": False},
-        "volume": {"data_type": "double", "nullable": False},
-        "close_time": {"data_type": "bigint", "nullable": False},
-        "quote_volume": {"data_type": "double", "nullable": False},
-        "count": {"data_type": "bigint", "nullable": False},
-        "taker_buy_volume": {"data_type": "double", "nullable": False},
-        "taker_buy_quote_volume": {"data_type": "double", "nullable": False},
-        "symbol": {"data_type": "text", "nullable": False},
-        "interval": {"data_type": "text", "nullable": False},
-    },
+    columns=KlineModel,
 )
 def klines_resource(
     symbol: str,

@@ -37,6 +37,7 @@ dependencies = [
   "polars>=1.0.0",
   "prefect>=3.7.0",
   "pyarrow>=24.0.0",
+  "pandera[polars]>=0.31.0",
   "pydantic-settings>=2.0.0",
   "tenacity>=9.1.4",
   "tqdm>=4.67.1",
