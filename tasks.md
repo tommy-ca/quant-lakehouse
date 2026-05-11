@@ -93,7 +93,7 @@ Prefect orchestration, archive cache, gap detection, explorer. 283 new-stack tes
 | Status | ID | Type | Description |
 |--------|----|------|-------------|
 | ⏳ | 7.1 | FR | Add `--source` flag to CLI commands (auto/rest/archive/ws) |
-| ⏳ | 7.2 | FR | List-symbols via dlt metadata source (fallback to S3 listing) |
+| ✅ | 7.2 | FR | List-symbols via dlt metadata source (fallback to S3 listing) |
 | ⏳ | 7.3 | FR | List-files via ArchiveClient or DuckDB archive cache |
 | ✅ | 7.4 | FR | Download via dlt archive source (aiohttp, in-memory) — `run_dlt_archive` exists |
 | ⏳ | 7.5 | FR | Verify via dlt schema_contract + Pandera (not SHA256) |

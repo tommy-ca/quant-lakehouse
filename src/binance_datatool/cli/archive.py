@@ -100,32 +100,46 @@ def list_symbols_command(
     ] = False,
     catalog_path: Annotated[
         str | None,
-        typer.Option("--catalog", help="DuckLake catalog path (required with --from-catalog)."),
-    ] = None,
-    cache_ttl: Annotated[
-        int | None,
         typer.Option(
-            "--cache-ttl",
-            help="Metadata cache TTL in seconds (default: 3600). Auto-refresh if stale.",
+            "--catalog", help="DuckLake catalog path (default: ~/.binance-datatool/lake)."
         ),
     ] = None,
+    source: Annotated[
+        str,
+        typer.Option("--source", help="Source: auto, archive (S3), or catalog (DuckDB)."),
+    ] = "auto",
 ) -> None:
     """List symbol directories under a Binance archive prefix.
 
-    Prints one symbol per line to stdout.
+    Prints one symbol per line to stdout. Defaults to DuckDB catalog
+    (dlt metadata). Use ``--source archive`` for live S3 listing.
     """
-    if from_catalog:
-        _list_symbols_from_catalog(
-            trade_type,
-            quotes,
-            exclude_leverage,
-            exclude_stables,
-            contract_type,
-            catalog_path,
-            cache_ttl,
-        )
+    if source == "catalog" or (source == "auto" and catalog_path):
+        # DuckDB metadata path (dlt)
+        _cat = catalog_path or str((resolve_archive_home().parent / "lake").resolve())
+        from binance_datatool.workflow.prefect_flows import run_dlt_metadata
+
+        run_dlt_metadata(trade_types=[trade_type.value], catalog_path=_cat)
+        import duckdb
+
+        con = duckdb.connect(str(Path(_cat) / "catalog.duckdb"))
+        rows = con.execute(
+            "SELECT symbol FROM metadata.symbols WHERE trade_type = ? ORDER BY symbol",
+            [trade_type.value],
+        ).fetchall()
+        for r in rows:
+            # Apply CLI filters in-memory
+            sym = r[0]
+            if quotes and not any(sym.endswith(q) for q in [q.upper() for q in quotes]):
+                continue
+            if exclude_stables and any(
+                stable in sym for stable in ("USDC", "USDP", "DAI", "TUSD", "BUSD", "FDUSD")
+            ):
+                continue
+            typer.echo(sym)
         return
 
+    # Live S3 listing (legacy fallback)
     symbol_filter = build_symbol_filter(
         trade_type=trade_type,
         quote_assets=frozenset(quote.upper() for quote in quotes) if quotes else None,
