@@ -70,7 +70,9 @@ class TestKlinesResource:
 
         source = build_binance_source(symbols=["BTCUSDT"], interval="1h")
         db = str(tmp_path / "catalog.duckdb")
-        pipeline = build_pipeline("test_klines", catalog_path=db, dataset_name="bronze")
+        pipeline = build_pipeline(
+            "test_klines", catalog_path=db, dataset_name="bronze", destination="duckdb"
+        )
         with patch(
             "binance_datatool.dlt_sources.binance.BinanceSpotRestClient", return_value=mock_client
         ):
@@ -97,7 +99,9 @@ class TestKlinesResource:
 
         source = build_binance_source(symbols=["BTCUSDT"], interval="1h")
         db = str(tmp_path / "catalog.duckdb")
-        pipeline = build_pipeline("test_empty", catalog_path=db, dataset_name="bronze")
+        pipeline = build_pipeline(
+            "test_empty", catalog_path=db, dataset_name="bronze", destination="duckdb"
+        )
         with patch(
             "binance_datatool.dlt_sources.binance.BinanceSpotRestClient", return_value=mock_client
         ):
@@ -165,7 +169,9 @@ class TestRestResources:
 
         source = build_rest_source(symbols=["BTCUSDT"], data_type="aggTrades")
         db = str(tmp_path / "catalog.duckdb")
-        pipeline = build_pipeline("test_agg", catalog_path=db, dataset_name="bronze")
+        pipeline = build_pipeline(
+            "test_agg", catalog_path=db, dataset_name="bronze", destination="duckdb"
+        )
         with patch(
             "binance_datatool.dlt_sources.binance_rest.BinanceSpotRestClient",
             return_value=mock_client,
@@ -207,13 +213,13 @@ class TestPipeline:
     """Tests for dlt pipeline helpers."""
 
     def test_build_pipeline_defaults(self):
-        pipeline = build_pipeline("test_pipeline")
+        pipeline = build_pipeline("test_pipeline", destination="duckdb")
         assert pipeline.pipeline_name == "test_pipeline"
         assert pipeline.dataset_name == "bronze"
 
     def test_build_pipeline_with_catalog_path(self, tmp_path):
         db = str(tmp_path / "lake" / "catalog.duckdb")
-        pipeline = build_pipeline("test", catalog_path=db)
+        pipeline = build_pipeline("test", catalog_path=db, destination="duckdb")
         assert pipeline.pipeline_name == "test"
 
     def test_run_source_returns_tables(self, tmp_path):
