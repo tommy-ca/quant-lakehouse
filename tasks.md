@@ -99,7 +99,7 @@ Prefect orchestration, archive cache, gap detection, explorer. 283 new-stack tes
 | ⏳ | 7.5 | FR | Verify via dlt schema_contract + Pandera (not SHA256) |
 | ⏳ | 7.6 | NFR | Default `--source=auto` — detect dlt availability, fallback to legacy |
 | ✅ | 8.2 | FR | Gap-fill: replace `GapFillWorkflow` with `dlt_sqlmesh_pipeline(source='rest')` |
-| ⏳ | 8.3 | FR | Health: replace archive-level checks with DuckLake anomaly detection |
+| ✅ | 8.3 | FR | Health: replace archive-level checks with DuckLake anomaly detection |
 | ⏳ | 8.5 | D | Mark legacy workflows as deprecated in docstrings |
 | ✅ | 10.1 | NFR | S3 listing: use DuckDB archive cache for subsequent runs — `ArchiveFileCache` exists |
 | ✅ | 10.2 | FR | Batch archive download via aria2c (keep existing code in `archive/downloader.py`) |

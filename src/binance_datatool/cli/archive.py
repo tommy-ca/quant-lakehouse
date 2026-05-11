@@ -34,6 +34,7 @@ from binance_datatool.workflow import (
 )
 from binance_datatool.workflow.prefect_flows import (
     gap_fill_flow,
+    health_flow,
     refresh_metadata_flow,
     sink_flow,
 )
@@ -727,56 +728,70 @@ def health_command(
         str | None,
         typer.Option("--archive-home", help="Override archive home."),
     ] = None,
+    ducklake: Annotated[
+        bool,
+        typer.Option("--ducklake", help="Check DuckLake silver tables instead of archive files."),
+    ] = True,
 ) -> None:
-    """Check health of local archive data.
+    """Check health of market data.
 
-    Reports completeness, freshness, and integrity for each symbol.
+    By default checks DuckLake silver tables (anomaly detection).
+    Pass ``--no-ducklake`` to check archive file integrity instead.
     """
     archive_home = resolve_archive_home(archive_home_path)
-    from binance_datatool.common import DataFrequency
 
     resolved_symbols = symbols or []
     if not resolved_symbols:
         typer.echo("Error: At least one SYMBOL argument required.", err=True)
         raise typer.Exit(code=2)
 
-    workflow = HealthCheckWorkflow(
-        trade_type=trade_type,
-        data_freq=DataFrequency.daily,
-        data_type=data_type,
-        symbols=resolved_symbols,
-        archive_home=archive_home,
-        interval=interval,
-        max_stale_days=max_stale,
-    )
+    if ducklake:
+        # DuckLake anomaly detection (new stack)
+        catalog = archive_home.parent / "lake"
+        for sym in resolved_symbols:
+            try:
+                h = health_flow(
+                    trade_type=trade_type.value,
+                    symbol=sym,
+                    data_type=data_type.value,
+                    interval=interval,
+                    archive_home=archive_home,
+                    catalog_path=catalog,
+                )
+                status = "HEALTHY" if h.get("healthy", False) else "ISSUES"
+                typer.echo(
+                    f"{sym}: {status} "
+                    f"(null_prices: {h.get('null_prices', 'N/A')}, "
+                    f"missing_dates: {h.get('missing_dates', 'N/A')})"
+                )
+            except Exception as exc:
+                typer.echo(f"{sym}: ERROR — {exc}", err=True)
+    else:
+        # Archive file integrity check (legacy)
+        from binance_datatool.common import DataFrequency
 
-    report = workflow.run()
-
-    for health in report.per_symbol:
-        status = "HEALTHY" if health.is_healthy else "ISSUES"
-        typer.echo(
-            f"{health.symbol}: {status} "
-            f"(dates: {health.date_count}, "
-            f"missing: {len(health.missing_dates)}, "
-            f"corrupted: {len(health.corrupted_files)}, "
-            f"latest: {health.latest_date or 'N/A'})"
+        workflow = HealthCheckWorkflow(
+            trade_type=trade_type,
+            data_freq=DataFrequency.daily,
+            data_type=data_type,
+            symbols=resolved_symbols,
+            archive_home=archive_home,
+            interval=interval,
+            max_stale_days=max_stale,
         )
-        if health.missing_dates:
-            typer.echo(f"  Missing: {health.missing_dates[:10]}", err=True)
-        if health.corrupted_files:
-            typer.echo(f"  Corrupted: {health.corrupted_files[:5]}", err=True)
-
-    typer.echo(
-        f"Summary: {report.healthy_symbols}/{report.total_symbols} healthy, "
-        f"{report.total_missing_dates} missing dates, "
-        f"{report.total_corrupted} corrupted files",
-        err=True,
-    )
-    if report.errors:
-        for err in report.errors:
-            typer.echo(f"Error: {err}", err=True)
-    if report.total_symbols > 0 and report.healthy_symbols < report.total_symbols:
-        raise typer.Exit(code=2)
+        report = workflow.run()
+        for health in report.per_symbol:
+            status = "HEALTHY" if health.is_healthy else "ISSUES"
+            typer.echo(
+                f"{health.symbol}: {status} "
+                f"(dates: {health.date_count}, "
+                f"missing: {len(health.missing_dates)}, "
+                f"corrupted: {len(health.corrupted_files)}, "
+                f"latest: {health.latest_date or 'N/A'})"
+            )
+        if report.errors:
+            for err in report.errors:
+                typer.echo(f"Error: {err}", err=True)
 
 
 @app.command("sink")
