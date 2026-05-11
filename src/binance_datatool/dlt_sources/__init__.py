@@ -9,6 +9,7 @@ Source layers:
 - ``binance_archive`` — S3 archive ZIP CSV (historical batch)
 - ``binance_rest`` — REST API aggTrades/fundingRate (live gap-fill)
 - ``binance_ws`` — WebSocket streaming klines (real-time)
+- ``binance_metadata`` — Symbol/venue metadata from archive + API
 """
 
 from binance_datatool.dlt_sources.binance import build_binance_source, klines_resource
@@ -16,6 +17,7 @@ from binance_datatool.dlt_sources.binance_archive import (
     archive_klines_resource,
     build_archive_source,
 )
+from binance_datatool.dlt_sources.binance_metadata import build_metadata_source, symbols_resource
 from binance_datatool.dlt_sources.binance_rest import (
     agg_trades_resource,
     build_rest_source,
@@ -33,4 +35,6 @@ __all__ = [
     "build_rest_source",
     "ws_klines_resource",
     "build_ws_source",
+    "symbols_resource",
+    "build_metadata_source",
 ]
