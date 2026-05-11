@@ -562,7 +562,10 @@ def transform_to_silver(
     )
     con = duckdb.connect(db_file)
     try:
-        bronze = con.execute("SELECT * FROM bronze.klines WHERE symbol = ?", [symbol]).pl()
+        bronze = con.execute(
+            f"SELECT symbol, funding_time, funding_rate "
+            f"FROM bronze.rest_{symbol.lower()}_funding_rate"
+        ).pl()
         if bronze.is_empty():
             return 0
         silver = bronze_klines_to_silver(
@@ -575,8 +578,8 @@ def transform_to_silver(
             "CREATE TABLE IF NOT EXISTS silver.klines AS SELECT * FROM silver.klines WHERE FALSE"
         )
         con.execute("DELETE FROM silver.klines WHERE symbol = ?", [symbol])
-        _silver_pd = silver.to_pandas()
-        con.execute("INSERT INTO silver.klines SELECT * FROM _silver_pd")
+        _arrow = silver.to_arrow()
+        con.execute("INSERT INTO silver.klines SELECT * FROM _arrow")
         return silver.height
     finally:
         con.close()
@@ -679,8 +682,8 @@ def transform_agg_trades_to_silver(
             "SELECT * FROM silver.agg_trades WHERE FALSE"
         )
         con.execute("DELETE FROM silver.agg_trades WHERE symbol = ?", [symbol])
-        _silver_pd = silver.to_pandas()
-        con.execute("INSERT INTO silver.agg_trades SELECT * FROM _silver_pd")
+        _arrow = silver.to_arrow()
+        con.execute("INSERT INTO silver.agg_trades SELECT * FROM _arrow")
         return silver.height
     finally:
         con.close()
@@ -712,8 +715,8 @@ def transform_funding_rate_to_silver(
             "SELECT * FROM silver.funding_rate WHERE FALSE"
         )
         con.execute("DELETE FROM silver.funding_rate WHERE symbol = ?", [symbol])
-        _silver_pd = silver.to_pandas()
-        con.execute("INSERT INTO silver.funding_rate SELECT * FROM _silver_pd")
+        _arrow = silver.to_arrow()
+        con.execute("INSERT INTO silver.funding_rate SELECT * FROM _arrow")
         return silver.height
     finally:
         con.close()
