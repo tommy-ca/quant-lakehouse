@@ -328,31 +328,71 @@ Klines have interval subdirectory: `{symbol}/{interval}/{symbol}-{dataType}-{int
 
 ## Data Pipeline Architecture
 
+### Legacy Pipeline (existing commands: download, verify, gap-fill, sink, health)
+
 ```
 Archive (S3) → Download → Verify
                     ↓
-GapFillWorkflow (--auto-detect)
-  ├── detect_gaps() → parse dates from filenames
-  └── run() → fetch via SDK REST → save as CSV + .CHECKSUM
+GapFillWorkflow → REST API fill
                     ↓
-LineageTracker.record(FILLED)
+HealthCheckWorkflow → completeness, freshness, integrity
                     ↓
-HealthCheckWorkflow
-  ├── completeness (date coverage)
-  ├── freshness (staleness check)
-  └── integrity (SHA256 verification)
-                    ↓
-SinkWorkflow (binance-datatool sink)
-  ├── Polars: read ZIP CSVs + filled CSVs
-  ├── normalize to Silver schemas (ts_event, ts_recv)
-  └── DuckLake v1.0 native tables (ACID, snapshots, partitioning)
-        DuckDB manages Parquet storage, file layout, partition tracking
+SinkWorkflow → Polars → DuckLake v1.0
+```
 
-Multi-symbol parallel processing (Prefect task mapping):
-                    ┌── BTCUSDT ── download → verify → fill → sink ──┐
-  historical_       ├── ETHUSDT ── download → verify → fill → sink ──┤
-  pipeline ──►      ├── SOLUSDT ── download → verify → fill → sink ──┤  (4 workers)
-                    └── ...       (parallel via .map())              ┘
+### dlt Pipeline (new, Prefect-orchestrated: ``dlt_sqlmesh_pipeline``)
+
+```
+dlt sources (one per layer):
+  REST klines    ─┐
+  REST aggTrades ─┤
+  REST fundingRt ├──→ DuckDB Bronze
+  Archive ZIPs   ─┤
+  WS streaming   ─┘
+                      ↓
+Polars transforms + Pandera validation:
+  bronze_klines_to_silver()        → silver.klines
+  bronze_agg_trades_to_silver()   → silver.agg_trades
+  bronze_funding_rate_to_silver() → silver.funding_rate
+                      ↓
+DuckDB Silver tables (same catalog.duckdb)
+                      ↓
+SQLMesh versioned models + audits (optional)
+```
+
+### Validation Layer (``binance_datatool.validation``)
+
+| Layer | Pandera Schema | Pydantic Model | Enforces |
+|-------|---------------|----------------|----------|
+| Bronze klines | ``BronzeKlinesSchema`` | ``KlineModel`` | types, nullability, ge/le, high>=low |
+| Silver klines | ``SilverKlinesSchema`` | — | 19 silver columns, cross-column checks |
+| Silver aggTrades | ``AggTradesSilverSchema`` | — | 16 columns, price>0, size>=0 |
+| Silver fundingRate | ``FundingRateSilverSchema`` | — | 12 columns |
+| dlt REST klines | — | ``KlineModel`` | pydantic field validators (dlt authoritative) |
+| dlt REST aggTrades | — | ``AggTradeModel`` | price>0, quantity>=0 |
+| dlt REST fundingRate | — | ``FundingRateModel`` | type-safe fields |
+
+### Prefect Flow: ``dlt_sqlmesh_pipeline``
+
+```
+dlt_sqlmesh_pipeline(symbol, data_type, source, trade_type)
+                      │
+           ┌──────────┴──────────┐
+           │  data_type dispatch  │
+           │ klines | aggTrades  │
+           │ fundingRate         │
+           └──────────┬──────────┘
+                      │
+        ┌─────────────┼─────────────┐
+        │ source=rest │ source=arch │ source=ws
+        │ run_dlt_*   │ run_dlt_*   │ run_dlt_*
+        └─────────────┴─────────────┘
+                      │
+           transform_*_to_silver()
+           (with Pandera validation)
+                      │
+           run_sqlmesh_plan()
+```
 ```
 
 ## CLI Commands Reference
