@@ -85,13 +85,15 @@ def _scan_data_types_for_freq(trade_type: TradeType, freq: str) -> list[str]:
     client = ArchiveClient()
     freq_enum = DataFrequency(freq)
     try:
-        prefixes = asyncio.run(
-            client.list_dir(
-                asyncio.run(client._create_session()),
-                f"data/{trade_type.s3_path}/{freq_enum.value}/",
-            )
-        )
-        return sorted(p.rstrip("/").split("/")[-1] for p in prefixes)
+
+        async def _scan() -> list[str]:
+            async with client._create_session() as session:
+                prefixes = await client.list_dir(
+                    session, f"data/{trade_type.s3_path}/{freq_enum.value}/"
+                )
+                return sorted(p.rstrip("/").split("/")[-1] for p in prefixes)
+
+        return asyncio.run(_scan())
     except Exception:
         return []
 
