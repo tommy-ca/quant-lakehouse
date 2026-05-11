@@ -779,14 +779,8 @@ def run_sqlmesh_plan(
     start: str | None = None,
     end: str | None = None,
 ) -> dict:
-    """Run SQLMesh plan to apply pending model changes.
-
-    Requires ``sqlmesh`` to be installed. Falls back gracefully when absent.
-    """
-    try:
-        from sqlmesh import Context
-    except ImportError:
-        return {"environment": environment, "applied": False, "error": "sqlmesh not installed"}
+    """Run SQLMesh plan to apply pending model changes."""
+    from sqlmesh import Context
 
     ctx = Context(paths=["config.yaml"])
     plan = ctx.plan(environment, start=start, end=end, include_unmodified=False)
