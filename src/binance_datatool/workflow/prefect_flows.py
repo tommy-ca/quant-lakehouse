@@ -537,7 +537,7 @@ def detect_bronze_gaps(
     Runs before dlt extraction so the pipeline can skip symbols with
     complete data.
     """
-    from binance_datatool.dlt_sources.gap_detection import detect_bronze_gaps as _detect
+    from binance_datatool.workflow.gap_detection import detect_bronze_gaps as _detect
 
     db_path = catalog_path or str(
         (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
