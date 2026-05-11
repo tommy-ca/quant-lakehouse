@@ -124,7 +124,31 @@ CLI interface stable for consumers.
 See docs/specs-driven-development.md for the full requirements and
 spec-driven development flows.
 
-## Exchange Clients: Official Binance SDK
+### Platform Evolution: dlt + SQLMesh
+
+The roadmap adds two major technologies to the stack (see
+`docs/brainstorms/2026-05-11-platform-evolution-requirements.md`):
+
+| Technology | Role | Replaces | Status |
+|-----------|------|----------|--------|
+| **dlt** | Extract/Load (schema inference, incremental state, pagination) | Hand-rolled pagination/retry/state in ExchangeClient wrappers | Planned |
+| **SQLMesh** | Transform (Bronze→Silver, audits, lineage, virtual environments) | Ad-hoc Polars transforms in SinkWorkflow | Planned |
+
+The target architecture:
+
+```
+dlt Sources (Binance, tardis.dev, Databento)
+  → Bronze DuckDB (auto-normalized per source)
+    → SQLMesh Models (Bronze→Silver INCREMENTAL_BY_TIME_RANGE)
+      → Silver DuckLake (partitioned, ACID)
+        → Feature Store (ML features, point-in-time datasets)
+          → Prefect Orchestration (schedules, SLAs, DLQ)
+```
+
+Existing workflows (download, verify, gap-fill, sink) remain fully operational as the
+legacy parallel path. New source integrations default to dlt + SQLMesh.
+
+### Why this generalization
 
 The `exchange/` module uses **official Binance SDK packages** (`binance-sdk-spot`,
 `binance-sdk-derivatives-trading-usds-futures`, `binance-sdk-derivatives-trading-coin-futures`).

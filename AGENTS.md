@@ -2,6 +2,9 @@
 
 ## Purpose
 - This repository hosts the `binance_datatool` Python package.
+- Roadmap: evolve from single-source CLI → multi-source data engineering platform with dlt,
+  SQLMesh, DuckDB/DuckLake, and Prefect. See `docs/brainstorms/2026-05-11-platform-evolution-requirements.md`
+  and `docs/plans/2026-05-11-005-platform-evolution-plan.md` for the full plan.
 - Treat checked-in source code, tests, configuration, and public documentation as the source of
   truth for current behavior.
 - Keep the repository easy for both human developers and AI agents to navigate.
@@ -14,6 +17,8 @@
 ## Documentation Navigation
 - Read `docs/architecture.md` before making structural or cross-layer changes.
 - Read `docs/extending.md` before adding a new command, workflow, enum member, or sub-command group.
+- Read `docs/brainstorms/2026-05-11-platform-evolution-requirements.md` before making multi-source or
+  stack-level decisions (dlt, SQLMesh, tardis.dev, Databento integration).
 - Read `docs/reference/testing.md` before changing tests, fixtures, or test layout conventions.
 - Use `docs/reference/README.md` as the entry point for module and CLI reference details.
 - Treat checked-in code and tests as higher priority than documentation if they conflict.
