@@ -669,24 +669,60 @@ def run_dlt_archive(
     symbol: str,
     interval: str = "1h",
     trade_type: str = "spot",
+    data_type: str = "klines",
     lookback_days: int | None = 7,
     catalog_path: str | None = None,
 ) -> dict:
-    """Run dlt pipeline to ingest Binance archive klines for one symbol.
+    """Run dlt pipeline to ingest Binance archive data for one symbol.
 
-    Fetches from live S3 (data.binance.vision). Use ``lookback_days``
-    to limit the number of files processed (default 7). Pass ``None``
-    to process all available history.
+    Pure EL flow:
+    1. Resolve S3 file keys (cache or live listing) — Prefect concern
+    2. Pass keys to dlt for download + parse — dlt concern
     """
-    from binance_datatool.dlt_sources.binance_archive import build_archive_source
+    from binance_datatool.archive.client import ArchiveClient
+    from binance_datatool.common.enums import DataFrequency, DataType
+    from binance_datatool.dlt_sources.binance_archive import archive_data_resource
     from binance_datatool.dlt_sources.pipeline import run_source
+    from binance_datatool.workflow.archive_cache import ArchiveFileCache
 
     tt = TradeType(trade_type)
-    source = build_archive_source(
-        symbols=[symbol], interval=interval, trade_type=tt, lookback_days=lookback_days
+    freq = DataFrequency.monthly if data_type == "fundingRate" else DataFrequency.daily
+    dt_enum = DataType(data_type)
+    iv = interval if data_type == "klines" else None
+
+    # Resolve file keys (cache-aware)
+    db_path = catalog_path or str(
+        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
     )
+    cache = ArchiveFileCache(db_path)
+    cache.ensure_table()
+    freq_str = freq.value
+    if cache.is_fresh(symbol, data_type, iv, trade_type, freq_str):
+        files = cache.list_cached(symbol, data_type, iv, trade_type, freq_str)
+    else:
+        client = ArchiveClient()
+        raw_files = asyncio.run(client.list_symbol_files(tt, freq, dt_enum, symbol, interval=iv))
+        files = [{"key": f.key, "last_modified": f.last_modified} for f in raw_files]
+        cache.refresh(symbol, data_type, iv, trade_type, freq_str)
+
+    # Filter by lookback
+    if lookback_days is not None and files:
+        from datetime import UTC, datetime, timedelta
+
+        cutoff = datetime.now(UTC) - timedelta(days=int(lookback_days))
+        files = [
+            f
+            for f in files
+            if (f.get("last_modified") and f["last_modified"].replace(tzinfo=UTC) > cutoff)
+        ]
+
+    s3_keys = [f["key"] for f in files]
+    if not s3_keys:
+        return {"tables_loaded": [], "files_count": 0}
+
+    resource = archive_data_resource(symbol, s3_keys, interval=iv, data_type=data_type)
     return run_source(
-        source, source_name=f"archive_{trade_type}_{symbol}", catalog_path=catalog_path
+        resource, source_name=f"archive_{trade_type}_{symbol}", catalog_path=catalog_path
     )
 
 
@@ -883,7 +919,7 @@ def dlt_sqlmesh_pipeline(
 
     print(f"  Stage 1: dlt ({source}) — ingesting {symbol} {data_type}")
     if source == "archive":
-        dlt_result = run_dlt_archive(symbol, _iv, _tt, db_path)
+        dlt_result = run_dlt_archive(symbol, _iv, _tt, data_type, catalog_path=db_path)
     elif source == "ws":
         dlt_result = run_dlt_ws(symbol, _iv, _tt, 100, db_path)
     else:

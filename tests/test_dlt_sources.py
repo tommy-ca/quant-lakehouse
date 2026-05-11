@@ -9,10 +9,7 @@ import pytest
 from binance_datatool.common.enums import TradeType
 from binance_datatool.common.types import KlineData
 from binance_datatool.dlt_sources.binance import build_binance_source, klines_resource
-from binance_datatool.dlt_sources.binance_archive import (
-    archive_list_files_resource,
-    build_archive_source,
-)
+from binance_datatool.dlt_sources.binance_archive import archive_data_resource
 from binance_datatool.dlt_sources.binance_rest import (
     agg_trades_resource,
     build_rest_source,
@@ -112,25 +109,26 @@ class TestKlinesResource:
 
 
 class TestArchiveResource:
-    """Tests for ``archive_data_resource`` — live S3 archive."""
+    """Tests for ``archive_data_resource`` — pure EL from S3 file keys."""
 
-    def test_build_archive_source_returns_source(self):
-        source = build_archive_source(
-            symbols=["BTCUSDT"], interval="1h", trade_type=TradeType.spot, data_type="klines"
+    def test_resource_creates_with_s3_keys(self):
+        res = archive_data_resource(
+            symbol="BTCUSDT",
+            s3_keys=["some/file.zip"],
+            interval="1h",
+            data_type="klines",
         )
-        assert source.name == "build_archive_source"
-        assert len(source.selected_resources) >= 1
+        assert res.name == "archive_klines"
+        assert res.write_disposition == "merge"
 
-    def test_build_archive_source_agg_trades(self):
-        source = build_archive_source(
-            symbols=["BTCUSDT"], trade_type=TradeType.spot, data_type="aggTrades"
+    def test_resource_empty_keys_returns_empty(self):
+        res = archive_data_resource(
+            symbol="BTCUSDT",
+            s3_keys=[],
+            interval="1h",
+            data_type="klines",
         )
-        assert len(source.selected_resources) >= 1
-
-    def test_archive_list_files_resource(self):
-        res = archive_list_files_resource("BTCUSDT", interval="1h")
-        assert res.name == "archive_files_BTCUSDT"
-        assert res.write_disposition == "replace"
+        assert res.name == "archive_klines"
 
 
 # ── REST AggTrades / FundingRate ─────────────────────────────────

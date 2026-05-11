@@ -10,11 +10,7 @@ Each module wraps an exchange/SDK client as ``@dlt.resource`` generators:
 """
 
 from binance_datatool.dlt_sources.binance import build_binance_source, klines_resource
-from binance_datatool.dlt_sources.binance_archive import (
-    archive_data_resource,
-    archive_list_files_resource,
-    build_archive_source,
-)
+from binance_datatool.dlt_sources.binance_archive import archive_data_resource
 from binance_datatool.dlt_sources.binance_metadata import build_metadata_source, symbols_resource
 from binance_datatool.dlt_sources.binance_rest import (
     agg_trades_resource,
@@ -27,8 +23,6 @@ __all__ = [
     "klines_resource",
     "build_binance_source",
     "archive_data_resource",
-    "archive_list_files_resource",
-    "build_archive_source",
     "agg_trades_resource",
     "funding_rate_resource",
     "build_rest_source",

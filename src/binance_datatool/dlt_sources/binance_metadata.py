@@ -1,18 +1,16 @@
 """dlt resources for Binance metadata — venues and symbols.
 
-Discovers venues (trade types), available data types per venue, and
-symbols from the live S3 archive. Uses the ``ArchiveExplorer`` for
-directory-level discovery and ``ArchiveListSymbolsWorkflow`` for
-per-symbol metadata.
+Pure extract+load: no S3 directory scanning, no discovery logic.
+Prefect resolves what to fetch (via ArchiveExplorer) and calls
+these resources with concrete parameters.
 
 Two resources:
-- ``venues_resource`` — scans S3 for trade types + data types per freq
-- ``symbols_resource`` — lists symbols per (trade_type, data_type, interval)
+- ``venues_resource`` — accepts pre-scanned venue data
+- ``symbols_resource`` — lists symbols per trade type
 """
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
@@ -21,25 +19,9 @@ import dlt
 from binance_datatool.archive.client import ArchiveClient
 from binance_datatool.common.enums import DataFrequency, DataType, TradeType
 from binance_datatool.validation.models import SymbolMetaModel, VenueModel
+from binance_datatool.workflow.list_symbols import ArchiveListSymbolsWorkflow
 
 ALL_TRADE_TYPES = [TradeType.spot, TradeType.um, TradeType.cm]
-ALL_DATA_TYPES = [
-    "klines",
-    "aggTrades",
-    "trades",
-    "fundingRate",
-    "bookDepth",
-    "bookTicker",
-    "indexPriceKlines",
-    "markPriceKlines",
-    "premiumIndexKlines",
-    "metrics",
-]
-ALL_FREQUENCIES = ["daily", "monthly"]
-INTERVAL_TYPES = {"klines", "indexPriceKlines", "markPriceKlines", "premiumIndexKlines"}
-
-
-# ── Venues resource ──────────────────────────────────────────────
 
 
 @dlt.resource(
@@ -47,64 +29,60 @@ INTERVAL_TYPES = {"klines", "indexPriceKlines", "markPriceKlines", "premiumIndex
     write_disposition="replace",
     columns=VenueModel,
 )
-def venues_resource() -> list[dict[str, Any]]:
-    """Discover venues (trade types) and their capabilities from S3.
+def venues_resource(
+    venues: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Load venue metadata.
 
-    Scans the archive directory structure for each trade type to find
-    available data types and frequencies. Returns one row per venue.
+    When ``venues`` is provided, loads them directly (Prefect has
+    already run ArchiveExplorer to discover them).  When ``None``,
+    returns hardcoded default venues.
+
+    Args:
+        venues: Pre-discovered venue data. Each entry needs
+            ``trade_type``, ``data_types``, ``frequencies``.
+
+    Returns:
+        List of venue dicts.
     """
     now_ms = int(datetime.now(UTC).timestamp() * 1000)
-    results: list[dict[str, Any]] = []
-
-    for tt in ALL_TRADE_TYPES:
-        # Scan available data types per frequency
-        all_types: set[str] = set()
-        freqs: list[str] = []
-        for freq in ALL_FREQUENCIES:
-            try:
-                dtypes = _scan_data_types_for_freq(tt, freq)
-                if dtypes:
-                    all_types.update(dtypes)
-                    freqs.append(freq)
-            except Exception:
-                continue
-        results.append(
-            {
-                "trade_type": tt.value,
-                "data_types": ",".join(sorted(all_types)) if all_types else None,
-                "frequencies": ",".join(freqs) if freqs else None,
-                "fetched_at": now_ms,
-            }
-        )
-    return results
+    if venues is not None:
+        for v in venues:
+            v.setdefault("fetched_at", now_ms)
+        return venues
+    # Fallback defaults when explorer hasn't run
+    return [
+        {"trade_type": "spot", "data_types": None, "frequencies": None, "fetched_at": now_ms},
+        {"trade_type": "um", "data_types": None, "frequencies": None, "fetched_at": now_ms},
+        {"trade_type": "cm", "data_types": None, "frequencies": None, "fetched_at": now_ms},
+    ]
 
 
-def _scan_data_types_for_freq(trade_type: TradeType, freq: str) -> list[str]:
-    """List data type directories under ``data/{trade_type}/{freq}/``."""
-    client = ArchiveClient()
-    freq_enum = DataFrequency(freq)
-    try:
-
-        async def _scan() -> list[str]:
-            async with client._create_session() as session:
-                prefixes = await client.list_dir(
-                    session, f"data/{trade_type.s3_path}/{freq_enum.value}/"
-                )
-                return sorted(p.rstrip("/").split("/")[-1] for p in prefixes)
-
-        return asyncio.run(_scan())
-    except Exception:
-        return []
-
-
-# ── Symbols resource ─────────────────────────────────────────────
-
-
-def _fetch_symbols_for(
-    trade_types: list[TradeType], data_type: str = "klines"
+@dlt.resource(
+    name="symbols",
+    write_disposition="replace",
+    columns=SymbolMetaModel,
+)
+def symbols_resource(
+    trade_types: list[TradeType] | None = None,
+    data_type: str = "klines",
 ) -> list[dict[str, Any]]:
-    """Fetch symbols for multiple trade types, returned as a flat list."""
-    from binance_datatool.workflow.list_symbols import ArchiveListSymbolsWorkflow
+    """Discover symbols from Binance archive for all trade types.
+
+    Pure EL: lists S3 symbol directories per trade type. No directory
+    scanning (ArchiveExplorer handles that separately).
+
+    Args:
+        trade_types: Trade types to scan.
+        data_type: Data type for symbol listing.
+
+    Returns:
+        List of symbol dicts with ``trade_type`` column.
+    """
+    if trade_types is None:
+        trade_types = ALL_TRADE_TYPES
+
+    import asyncio
 
     client = ArchiveClient()
     dt_enum = DataType(data_type)
@@ -152,44 +130,20 @@ def _fetch_symbols_for(
     return all_symbols
 
 
-@dlt.resource(
-    name="symbols",
-    write_disposition="replace",
-    columns=SymbolMetaModel,
-)
-def symbols_resource(
-    trade_types: list[TradeType] | None = None,
-    data_type: str = "klines",
-) -> list[dict[str, Any]]:
-    """Discover symbols from Binance archive for all trade types.
-
-    Returns a single list with ``trade_type`` column for filtering.
-    """
-    if trade_types is None:
-        trade_types = ALL_TRADE_TYPES
-    return _fetch_symbols_for(trade_types, data_type)
-
-
-# ── Source builder ───────────────────────────────────────────────
-
-
 @dlt.source
 def build_metadata_source(
     trade_types: list[TradeType] | None = None,
+    venues: list[dict[str, Any]] | None = None,
 ) -> list[dlt.Resource]:
     """Build a dlt source for Binance metadata — venues + symbols.
 
-    Returns all resources:
-    - ``venues`` — one row per trade type with capabilities
-    - ``symbols_{tt}`` — symbols per trade type (klines by default)
-
     Args:
-        trade_types: Trade types to scan (defaults to all: spot, um, cm).
+        trade_types: Trade types to scan for symbols.
+        venues: Pre-discovered venue data (from ArchiveExplorer).
 
     Returns:
         List of dlt Resources.
     """
     if trade_types is None:
         trade_types = ALL_TRADE_TYPES
-
-    return [venues_resource(), symbols_resource(trade_types=trade_types)]
+    return [venues_resource(venues=venues), symbols_resource(trade_types=trade_types)]
