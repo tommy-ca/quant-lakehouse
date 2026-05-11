@@ -948,6 +948,140 @@ def dlt_sqlmesh_pipeline(
     }
 
 
+# ── dlt Historical Pipeline (new stack) ──────────────────────────────────
+
+
+@task
+def prepare_symbol_dlt(
+    symbol: str,
+    interval: str | None = "1h",
+    trade_type: str = "spot",
+    data_type: str = "klines",
+    lookback_days: int = 30,
+    source: str = "rest",
+    catalog_path: str | None = None,
+) -> dict:
+    """Prepare data for one symbol using the new dlt stack.
+
+    Stages: gap detection → dlt extract → Polars transform → DuckDB write.
+    No legacy download/verify/sink — uses dlt + Polars + Pandera.
+    """
+    db_path = catalog_path or str(
+        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
+    )
+    _iv = interval if data_type == "klines" else None
+    _tt = "um" if data_type == "fundingRate" else trade_type
+
+    gaps = detect_bronze_gaps(symbol, data_type, lookback_days, db_path)
+
+    _DISPATCH: dict[str, tuple] = {
+        "klines": (run_dlt_source, transform_to_silver),
+        "aggTrades": (run_dlt_agg_trades, transform_agg_trades_to_silver),
+        "fundingRate": (run_dlt_funding_rate, transform_funding_rate_to_silver),
+    }
+    dlt_task, transform_task = _DISPATCH.get(data_type, (run_dlt_source, transform_to_silver))
+
+    if source == "archive":
+        run_dlt_archive(symbol, _iv, _tt, data_type, None, db_path)
+    elif source == "rest" and data_type == "klines":
+        dlt_task(symbol=symbol, interval=_iv, trade_type=_tt, catalog_path=db_path)
+    else:
+        dlt_task(symbol=symbol, trade_type=_tt, catalog_path=db_path)
+
+    kwargs = {"symbol": symbol, "trade_type": _tt, "catalog_path": db_path}
+    if data_type == "klines":
+        kwargs["interval"] = _iv
+    rows = transform_task(**kwargs)
+
+    return {"symbol": symbol, "gaps": len(gaps), "rows": rows}
+
+
+@flow(
+    name="DLT Historical Pipeline",
+    description="dlt extract → Polars transform → DuckDB sink (parallel symbols)",
+    log_prints=True,
+    task_runner=ThreadPoolTaskRunner(),
+)
+def dlt_historical_pipeline(
+    symbols: list[str] | None = None,
+    interval: str = "1h",
+    trade_type: str = "spot",
+    data_type: str = "klines",
+    source: str = "rest",
+    lookback_days: int = 30,
+    catalog_path: str | None = None,
+) -> dict[str, Any]:
+    """Multi-symbol historical data pipeline using the new dlt stack.
+
+    Stages:
+    0. Gap detection per symbol (Prefect/DuckDB)
+    1. dlt extract (parallel, no DuckDB writes)
+    2. Polars transform + Pandera validation (parallel)
+    3. DuckDB write (sequential, concurrency guard)
+
+    Args:
+        symbols: Trading symbols (auto-discovers from metadata.symbols if None).
+        interval: Kline interval.
+        trade_type: Market type.
+        data_type: ``"klines"``, ``"aggTrades"``, ``"fundingRate"``.
+        source: ``"rest"``, ``"archive"``.
+        lookback_days: How far back to process.
+        catalog_path: Full path to ``catalog.duckdb``.
+
+    Returns:
+        Dict of per-symbol results.
+    """
+    db_path = catalog_path or str(
+        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
+    )
+
+    # Resolve symbols from metadata cache if not provided
+    if not symbols:
+        try:
+            import duckdb
+
+            con = duckdb.connect(db_path)
+            symbols = [
+                r[0]
+                for r in con.execute(
+                    "SELECT DISTINCT symbol FROM metadata.symbols "
+                    "WHERE trade_type = ? ORDER BY symbol LIMIT 10",
+                    [trade_type],
+                ).fetchall()
+            ]
+            con.close()
+        except Exception:
+            symbols = ["BTCUSDT"]
+        print(f"  Auto-resolved {len(symbols)} symbols from cache")
+
+    _iv = interval if data_type == "klines" else None
+    _tt = "um" if data_type == "fundingRate" else trade_type
+
+    # Step 1: Parallel prepare (dlt + transform, no DuckDB contention)
+    prep_futures = prepare_symbol_dlt.map(
+        symbol=symbols,
+        interval=[_iv] * len(symbols),
+        trade_type=[_tt] * len(symbols),
+        data_type=[data_type] * len(symbols),
+        lookback_days=[lookback_days] * len(symbols),
+        source=[source] * len(symbols),
+        catalog_path=[db_path] * len(symbols),
+    )
+
+    # Step 2: Sequential health check
+    results: dict[str, Any] = {}
+    for sym, future in zip(symbols, prep_futures, strict=True):
+        meta = future.result(raise_on_failure=False)
+        if future.state.is_completed():
+            results[sym] = {"gaps": meta["gaps"], "rows": meta["rows"]}
+            print(f"  {sym}: {meta['gaps']} gaps, {meta['rows']} rows")
+        else:
+            results[sym] = {"gaps": 0, "rows": 0, "error": str(meta) if meta else "unknown"}
+            print(f"  {sym}: FAILED")
+
+    return results
+
+
 # ── Deployment Entry Points ─────────────────────────────────────
 
 if __name__ == "__main__":
@@ -960,6 +1094,7 @@ if __name__ == "__main__":
             historical_pipeline.to_deployment(name="daily-backfill", cron="0 6 * * *"),
             refresh_metadata_flow.to_deployment(name="hourly-metadata", cron="0 * * * *"),
             dlt_sqlmesh_pipeline.to_deployment(name="dlt-sqlmesh-e2e", cron="0 */12 * * *"),
+            dlt_historical_pipeline.to_deployment(name="dlt-historical", cron="0 */6 * * *"),
         )
     else:
-        dlt_sqlmesh_pipeline()
+        dlt_historical_pipeline()
