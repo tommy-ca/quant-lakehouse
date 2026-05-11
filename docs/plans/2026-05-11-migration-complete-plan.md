@@ -23,6 +23,24 @@ status: proposal
 
 ## Migration Phases
 
+### aria2c Preservation
+
+The existing aria2c downloader (`archive/downloader.py`, 210 LOC) is **not removed**. It provides:
+
+- Parallel batch download (16 connections by default)
+- Resumable downloads for large backfills
+- Subprocess-based, no Python GIL contention
+
+The dlt archive source uses aiohttp (simpler, in-memory, no temp files) for incremental
+updates. aria2c remains available for:
+- Full archive backfills (6,400 files = 5 min via aria2c vs 82 min via aiohttp)
+- CLI direct usage (`binance-datatool download`)
+- Legacy workflow compatibility
+
+**Future**: When the dlt archive resource is extended for batch mode, it can delegate
+to aria2c via the existing `download_archive_files()` function in `downloader.py` or
+use `asyncio.gather()` with aiohttp for a dependency-free parallel path.
+
 ### Phase 1: Wire dlt Sources to CLI (estimated: 1 session)
 
 **Goal**: All 8 CLI commands work with dlt sources as primary, fall back to legacy.
@@ -107,6 +125,11 @@ status: proposal
 1. `datacontract.py` (443 lines) — zero callers, move to `docs/proposals/` per AGENTS.md accuracy rule
 2. `lineage.py` (401 lines) — only used by legacy workflows, move to `workflow/legacy/`
 3. `catalog.py` (DuckLakeCatalog 365 lines) — replaced by `dlt.destinations.ducklake()`, move to `workflow/legacy/`
+
+**Preserved**: `archive/downloader.py` (210 LOC, aria2c) is kept for batch backfill performance.
+The legacy CLI paths (`binance-datatool download`, `binance-datatool verify`) remain operational
+and continue to use aria2c. Only the unused ``DataContract``, ``LineageTracker``, and
+``DuckLakeCatalog`` modules that have clean dlt replacements are archived.
 
 **Risk**: Low. All confirmed unused or replaced.
 

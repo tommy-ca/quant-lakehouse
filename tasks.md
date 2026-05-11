@@ -119,8 +119,8 @@ Status: `⏳` pending, `🔄` in progress, `✅` done, `❌` cancelled
 | Status | ID | Type | Description |
 |--------|----|------|-------------|
 | ⏳ | 10.1 | NFR | S3 listing: use DuckDB archive cache for subsequent runs (done: ArchiveFileCache) |
-| ⏳ | 10.2 | NFR | Archive download: evaluate aria2c for full backfill (see download-analysis below) |
-| ⏳ | 10.3 | NFR | Parallelize archive ZIP fetching in dlt resource |
+| ⏳ | 10.2 | FR | Batch archive download via aria2c (keep existing code in `archive/downloader.py`) |
+| ⏳ | 10.3 | NFR | Parallelize archive ZIP fetching in dlt resource (asyncio.gather) |
 | ⏳ | 10.4 | NFR | Add DuckLake table maintenance (CALL merge_adjacent_files) to Prefect flows |
 
 ---
