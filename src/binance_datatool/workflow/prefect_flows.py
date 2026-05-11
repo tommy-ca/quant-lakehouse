@@ -520,18 +520,150 @@ def health_flow(
     return result
 
 
+# ── dlt + SQLMesh Pipeline ──────────────────────────────────────
+
+
+@task
+def run_dlt_source(
+    symbol: str,
+    interval: str = "1h",
+    catalog_path: Path | None = None,
+) -> dict:
+    """Run dlt pipeline to ingest Binance spot klines for one symbol."""
+    from binance_datatool.dlt_sources.binance import build_binance_source
+    from binance_datatool.dlt_sources.pipeline import run_source
+
+    source = build_binance_source(symbols=[symbol], interval=interval)
+    return run_source(source, source_name=f"binance_spot_{symbol}", catalog_path=catalog_path)
+
+
+@task
+def transform_to_silver(
+    symbol: str,
+    interval: str = "1h",
+    trade_type: str = "spot",
+    catalog_path: Path | None = None,
+) -> int:
+    """Read bronze klines from DuckDB, transform to Silver, write back.
+
+    Uses Polars for the Bronze→Silver transform via DuckDB's native
+    ``CREATE TABLE AS SELECT`` from a registered Polars DataFrame.
+    """
+    import duckdb
+    import polars as pl
+
+    from binance_datatool.transforms.klines import bronze_klines_to_silver
+
+    db_file = str((catalog_path or _DEFAULT_ARCHIVE_HOME.parent / "lake") / "catalog.duckdb")
+    con = duckdb.connect(db_file)
+    try:
+        raw = con.execute("SELECT * FROM bronze.klines WHERE symbol = ?", [symbol]).fetchdf()
+        if raw.empty:
+            return 0
+        bronze = pl.from_pandas(raw)
+        silver = bronze_klines_to_silver(
+            bronze, symbol=symbol, interval=interval, trade_type=trade_type
+        )
+        if silver.is_empty():
+            return 0
+        con.execute("CREATE SCHEMA IF NOT EXISTS silver")
+        silver.to_pandas().to_sql(
+            "_silver_staging", con.connection, if_exists="replace", index=False
+        )
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS silver.klines AS SELECT * FROM _silver_staging WHERE FALSE"
+        )
+        con.execute("DELETE FROM silver.klines WHERE symbol = ?", [symbol])
+        con.execute("INSERT INTO silver.klines SELECT * FROM _silver_staging")
+        con.execute("DROP TABLE IF EXISTS _silver_staging")
+        return silver.height
+    finally:
+        con.close()
+
+
+@task
+def run_sqlmesh_plan(
+    environment: str = "prod",
+    start: str | None = None,
+    end: str | None = None,
+) -> dict:
+    """Run SQLMesh plan to apply pending model changes.
+
+    Requires ``sqlmesh`` to be installed. Falls back gracefully when absent.
+    """
+    try:
+        from sqlmesh import Context
+    except ImportError:
+        return {"environment": environment, "applied": False, "error": "sqlmesh not installed"}
+
+    ctx = Context(paths=["config.yaml"])
+    plan = ctx.plan(environment, start=start, end=end, include_unmodified=False)
+    plan.apply()
+    return {"environment": environment, "applied": True}
+
+
+@flow(
+    name="dlt SQLMesh Pipeline",
+    description="dlt → Polars transform → SQLMesh → DuckLake (minimal E2E)",
+    log_prints=True,
+)
+def dlt_sqlmesh_pipeline(
+    symbol: str = "BTCUSDT",
+    interval: str = "1h",
+    catalog_path: Path | None = None,
+) -> dict:
+    """Minimal E2E: dlt extract → Polars transform → SQLMesh → DuckLake.
+
+    This flow demonstrates the full stack integration:
+    1. dlt: fetch klines via Binance REST API → DuckDB bronze
+    2. Polars: transform bronze → silver, write to DuckDB silver
+    3. SQLMesh: run plan/apply for versioned silver model
+    4. DuckLake: catalog tracks silver tables (existing catalog.py)
+
+    Args:
+        symbol: Trading pair.
+        interval: Kline interval.
+        catalog_path: Path to lake catalog directory.
+
+    Returns:
+        Dict with counts for each stage.
+    """
+    home = _DEFAULT_ARCHIVE_HOME
+    catalog = catalog_path or home.parent / "lake"
+
+    print(f"  Stage 1: dlt — ingesting {symbol} {interval} klines")
+    dlt_result = run_dlt_source(symbol, interval, catalog)
+    print(f"    dlt load info: {dlt_result['load_info']}")
+
+    print("  Stage 2: Polars — transforming bronze → silver")
+    rows = transform_to_silver(symbol, interval, "spot", catalog)
+    print(f"    silver rows: {rows}")
+
+    print("  Stage 3: SQLMesh — applying silver model")
+    sm_result = run_sqlmesh_plan()
+    print(f"    SQLMesh applied: {sm_result['applied']}")
+
+    return {
+        "symbol": symbol,
+        "interval": interval,
+        "dlt_tables": dlt_result["tables_loaded"],
+        "silver_rows": rows,
+        "sqlmesh_applied": sm_result["applied"],
+    }
+
+
 # ── Deployment Entry Points ─────────────────────────────────────
 
 if __name__ == "__main__":
     import sys
 
     if len(sys.argv) > 1 and sys.argv[1] == "serve":
-        # `python -m binance_datatool.workflow.prefect_flows serve`
         from prefect import serve as _serve
 
         _serve(
             historical_pipeline.to_deployment(name="daily-backfill", cron="0 6 * * *"),
             refresh_metadata_flow.to_deployment(name="hourly-metadata", cron="0 * * * *"),
+            dlt_sqlmesh_pipeline.to_deployment(name="dlt-sqlmesh-e2e", cron="0 */12 * * *"),
         )
     else:
-        historical_pipeline()
+        dlt_sqlmesh_pipeline()

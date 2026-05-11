@@ -1,0 +1,18 @@
+# SQLMesh project configuration for binance-datatool.
+# Connects to the same DuckDB database used by dlt and the existing sink.
+# See: https://sqlmesh.readthedocs.io/en/stable/guides/setup/
+
+gateways:
+  local:
+    connection:
+      type: duckdb
+      database: lake/catalog.duckdb
+      extensions:
+        - parquet
+        - json
+
+default_environment: prod
+
+model_defaults:
+  dialect: duckdb
+  start: 2026-01-01

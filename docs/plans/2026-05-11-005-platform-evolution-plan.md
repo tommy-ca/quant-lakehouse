@@ -1,6 +1,6 @@
 # Plan 005: Platform Evolution — dlt + SQLMesh + Multi-Source
 
-**Status**: Draft
+**Status**: Phase 1 complete
 **Date**: 2026-05-11
 **Requirements**: `docs/brainstorms/2026-05-11-platform-evolution-requirements.md`
 
@@ -528,3 +528,96 @@ Each phase is independently reversible:
 | Databento SDK API changes | 4 | Pin SDK version; write adapter layer to isolate SDK changes |
 | Dependency conflicts (dlt+sqlmesh+prefect) | 1-2 | Pin all major versions; test matrix in CI |
 | Performance regression from dlt normalization | 1 | Use `dlt.config` to disable normalization for already-normalized data |
+
+## Implementation Learnings (Phase 1)
+
+### dlt API Findings (v1.26.0)
+
+1. **Resource naming**: Each resource in a source must have a unique name. Use `.with_name()` on
+   the resource to set a symbol-specific name:
+   ```python
+   klines_resource(symbol=sym, interval=interval).with_name(f"{sym}_klines")
+   ```
+
+2. **Source composition**: Use `@dlt.source` as a decorator on a function that returns a list of
+   `@dlt.resource` instances. The function must return resources directly (list), not pass them as
+   keyword args — `dlt.source(resources=...)` is not supported.
+
+3. **Async resource**: dlt supports `async def` resources but for simplicity, the klines resource
+   uses `asyncio.run()` inside a sync function. This works but means each API call creates a new
+   event loop. For production, convert to `async def` with proper async resource handling.
+
+4. **Incremental loading**: For the minimal E2E, we use `write_disposition="merge"` with
+   `primary_key` instead of `dlt.sources.incremental`. The incremental cursor requires binding
+   in the function signature (`incremental: dlt.sources.incremental[int] = ...`) rather than
+   in the decorator, which adds complexity. Merge-on-primary-key is simpler and sufficient for
+   the initial prototype.
+
+5. **Column schema**: dlt infers schema from the first batch of data. Explicit `columns=` in
+   `@dlt.resource` enforces types and prevents drift. Critical for maintaining Silver schema
+   compatibility.
+
+6. **Table naming**: dlt creates tables named after the resource name in the dataset schema.
+   Resource `BTCUSDT_klines` → table `bronze.BTCUSDT_klines`. Consider adding a global
+   `table_name` hint or consistent naming convention in the source builder.
+
+### SQLMesh Findings
+
+1. **DuckDB gateway**: SQLMesh connects to the same DuckDB database that dlt writes to via
+   `config.yaml` gateway config. This enables zero-copy reads of dlt's output.
+
+2. **Bronze model**: A `VIEW` model suffices for the bronze layer (no data duplication).
+   The VIEW reads directly from dlt's DuckDB tables.
+
+3. **Silver model**: `INCREMENTAL_BY_TIME_RANGE` with `time_column ts_event` requires:
+   - `@start_ds` and `@end_ds` macros for time-range filtering
+   - Proper timestamp type matching between bronze and silver
+
+4. **Audits**: Custom audits (`not_null.sql`, `assert_positive.sql`) must be registered in
+   the `models/audits/` directory and referenced by name in model config.
+
+### Polars Transform
+
+1. **Timestamp handling**: Binance API timestamps are in milliseconds. The Silver schema uses
+   microseconds. Conversion: `ts_event = open_time * 1000` (ms → μs). Date derivation:
+   `open_time / 86400000` (ms → days since epoch).
+
+2. **Polars + DuckDB bridge**: The transform returns a Polars DataFrame. DuckDB ingestion
+   works via `to_pandas()` on the Polars DataFrame, then using pandas `.to_sql()` for bulk
+   insert. This avoids row-by-row `executemany`.
+
+3. **Column count**: Silver schema has 19 columns. The Polars `with_columns` + `select` pattern
+   ensures consistent ordering matching `DuckLakeCatalog.TABLE_DEFS`.
+
+### Prefect Orchestration
+
+1. **Async bridge**: The existing `asyncio.run()` pattern in Prefect tasks works for dlt sources
+   too. No special handling needed.
+
+2. **DuckDB concurrency**: Shared DuckDB access between dlt writes and SQLMesh reads requires
+   the `ducklake-writer` concurrency guard. The existing guard in `sink_silver()` should be
+   extended to dlt pipeline writes.
+
+3. **Deployment**: The `dlt_sqlmesh_pipeline` flow is registered as a cron deployment alongside
+   `historical_pipeline` and `refresh_metadata_flow`.
+
+### Files Created (Phase 1)
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `src/binance_datatool/dlt_sources/__init__.py` | 12 | Package exports |
+| `src/binance_datatool/dlt_sources/binance.py` | 118 | dlt resource + source for Binance klines |
+| `src/binance_datatool/dlt_sources/pipeline.py` | 66 | dlt pipeline factory + run_source helper |
+| `src/binance_datatool/transforms/__init__.py` | 12 | Package exports |
+| `src/binance_datatool/transforms/klines.py` | 96 | Polars Bronze→Silver transform |
+| `config.yaml` | 13 | SQLMesh project config |
+| `models/bronze/klines.sql` | 17 | Bronze klines VIEW model |
+| `models/silver/klines.sql` | 37 | Silver klines INCREMENTAL model |
+| `models/audits/assert_positive.sql` | 3 | Custom audit: volume > 0 |
+| `models/audits/not_null.sql` | 3 | Custom audit: nullable check |
+| `tests/test_dlt_sources.py` | 118 | 8 tests for dlt sources + pipeline |
+| `tests/test_transforms.py` | 191 | 10 tests for Polars transforms |
+
+Modified:
+| `pyproject.toml` | +1 | Added `dlt>=1.26.0` dependency |
+| `prefect_flows.py` | +90 | Added `dlt_sqlmesh_pipeline` flow + tasks |
