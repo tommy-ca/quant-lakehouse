@@ -588,6 +588,26 @@ def transform_to_silver(
 
 
 @task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
+def run_dlt_metadata(
+    trade_types: list[str] | None = None,
+    catalog_path: str | None = None,
+) -> dict:
+    """Run dlt pipeline to discover symbols from the archive."""
+    from binance_datatool.dlt_sources.binance_metadata import build_metadata_source
+    from binance_datatool.dlt_sources.pipeline import run_source
+
+    if trade_types is None:
+        trade_types = ["spot", "um", "cm"]
+    from binance_datatool.common.enums import TradeType
+
+    types = [TradeType(tt) for tt in trade_types]
+    source = build_metadata_source(trade_types=types)
+    return run_source(
+        source, source_name="metadata", catalog_path=catalog_path, dataset_name="metadata"
+    )
+
+
+@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
 def run_dlt_archive(
     symbol: str,
     interval: str = "1h",
