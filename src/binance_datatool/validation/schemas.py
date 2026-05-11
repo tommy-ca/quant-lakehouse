@@ -71,6 +71,52 @@ class SilverKlinesSchema(pa.DataFrameModel):
     ts_date: pl.Date = pa.Field(nullable=False)
 
 
+class AggTradesSilverSchema(pa.DataFrameModel):
+    """Schema for silver aggTrades (Polars transform output, pre-DuckDB insert)."""
+
+    class Config:
+        coerce = True
+        strict = True
+
+    ts_event: int = pa.Field(ge=0, nullable=False)
+    ts_recv: int = pa.Field(ge=0, nullable=False)
+    price: float = pa.Field(ge=0, nullable=False)
+    size: float = pa.Field(ge=0, nullable=False)
+    side: str = pa.Field(nullable=False)
+    trade_id: int = pa.Field(ge=0, nullable=False)
+    is_buyer_maker: int = pa.Field(nullable=False)
+    agg_trade_id: int = pa.Field(ge=0, nullable=False)
+    rtype: str = pa.Field(nullable=False)
+    source: str = pa.Field(nullable=False)
+    exchange: str = pa.Field(nullable=False)
+    trade_type: str = pa.Field(nullable=False)
+    symbol: str = pa.Field(nullable=False)
+    data_type: str = pa.Field(nullable=False)
+    ingested_at: int = pa.Field(ge=0, nullable=False)
+    ts_date: object = pa.Field(nullable=False)
+
+
+class FundingRateSilverSchema(pa.DataFrameModel):
+    """Schema for silver fundingRate (Polars transform output, pre-DuckDB insert)."""
+
+    class Config:
+        coerce = True
+        strict = True
+
+    ts_event: int = pa.Field(ge=0, nullable=False)
+    ts_recv: int = pa.Field(ge=0, nullable=False)
+    funding_rate: float = pa.Field(nullable=False)
+    mark_price: float = pa.Field(nullable=False)
+    funding_timestamp: int = pa.Field(ge=0, nullable=False)
+    source: str = pa.Field(nullable=False)
+    exchange: str = pa.Field(nullable=False)
+    trade_type: str = pa.Field(nullable=False)
+    symbol: str = pa.Field(nullable=False)
+    data_type: str = pa.Field(nullable=False)
+    ingested_at: int = pa.Field(ge=0, nullable=False)
+    ts_date: object = pa.Field(nullable=False)
+
+
 # ── Cross-column validation helpers ──────────────────────────────
 
 

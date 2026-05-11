@@ -584,6 +584,153 @@ def transform_to_silver(
         con.close()
 
 
+@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
+def run_dlt_archive(
+    symbol: str,
+    interval: str = "1h",
+    trade_type: str = "spot",
+    catalog_path: str | None = None,
+) -> dict:
+    """Run dlt pipeline to ingest Binance archive klines for one symbol."""
+    from binance_datatool.dlt_sources.binance_archive import build_archive_source
+    from binance_datatool.dlt_sources.pipeline import run_source
+
+    tt = TradeType(trade_type)
+    source = build_archive_source(symbols=[symbol], interval=interval, trade_type=tt)
+    return run_source(
+        source, source_name=f"archive_{trade_type}_{symbol}", catalog_path=catalog_path
+    )
+
+
+@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
+def run_dlt_agg_trades(
+    symbol: str,
+    trade_type: str = "spot",
+    catalog_path: str | None = None,
+) -> dict:
+    """Run dlt pipeline to ingest Binance aggTrades for one symbol."""
+    from binance_datatool.dlt_sources.binance_rest import build_rest_source
+    from binance_datatool.dlt_sources.pipeline import run_source
+
+    tt = TradeType(trade_type)
+    source = build_rest_source(symbols=[symbol], data_type="aggTrades", trade_type=tt)
+    return run_source(
+        source, source_name=f"agg_trades_{trade_type}_{symbol}", catalog_path=catalog_path
+    )
+
+
+@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
+def run_dlt_funding_rate(
+    symbol: str,
+    trade_type: str = "um",
+    catalog_path: str | None = None,
+) -> dict:
+    """Run dlt pipeline to ingest Binance fundingRate for one symbol."""
+    from binance_datatool.dlt_sources.binance_rest import build_rest_source
+    from binance_datatool.dlt_sources.pipeline import run_source
+
+    tt = TradeType(trade_type)
+    source = build_rest_source(symbols=[symbol], data_type="fundingRate", trade_type=tt)
+    return run_source(
+        source, source_name=f"funding_rate_{trade_type}_{symbol}", catalog_path=catalog_path
+    )
+
+
+@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
+def run_dlt_ws(
+    symbol: str,
+    interval: str = "1h",
+    trade_type: str = "spot",
+    max_items: int = 100,
+    catalog_path: str | None = None,
+) -> dict:
+    """Run dlt pipeline to stream Binance klines via WebSocket for one symbol."""
+    from binance_datatool.dlt_sources.binance_ws import build_ws_source
+    from binance_datatool.dlt_sources.pipeline import run_source
+
+    tt = TradeType(trade_type)
+    source = build_ws_source(
+        symbols=[symbol], interval=interval, trade_type=tt, max_items=max_items
+    )
+    return run_source(source, source_name=f"ws_{trade_type}_{symbol}", catalog_path=catalog_path)
+
+
+@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
+def transform_agg_trades_to_silver(
+    symbol: str,
+    trade_type: str = "spot",
+    catalog_path: str | None = None,
+) -> int:
+    """Read bronze aggTrades from DuckDB, transform to Silver, write back."""
+    import duckdb
+    import polars as pl
+
+    from binance_datatool.transforms.agg_trades import bronze_agg_trades_to_silver
+
+    db_file = catalog_path or str(
+        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
+    )
+    con = duckdb.connect(db_file)
+    try:
+        table = f"bronze.rest_{symbol.lower()}_agg_trades"
+        raw = con.execute(f"SELECT * FROM {table}").fetchdf()
+        if raw.empty:
+            return 0
+        bronze = pl.from_pandas(raw)
+        silver = bronze_agg_trades_to_silver(bronze, symbol=symbol, trade_type=trade_type)
+        if silver.is_empty():
+            return 0
+        con.execute("CREATE SCHEMA IF NOT EXISTS silver")
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS silver.agg_trades AS "
+            "SELECT * FROM silver.agg_trades WHERE FALSE"
+        )
+        con.execute("DELETE FROM silver.agg_trades WHERE symbol = ?", [symbol])
+        _silver_pd = silver.to_pandas()
+        con.execute("INSERT INTO silver.agg_trades SELECT * FROM _silver_pd")
+        return silver.height
+    finally:
+        con.close()
+
+
+@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
+def transform_funding_rate_to_silver(
+    symbol: str,
+    trade_type: str = "um",
+    catalog_path: str | None = None,
+) -> int:
+    """Read bronze fundingRate from DuckDB, transform to Silver, write back."""
+    import duckdb
+    import polars as pl
+
+    from binance_datatool.transforms.funding_rate import bronze_funding_rate_to_silver
+
+    db_file = catalog_path or str(
+        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
+    )
+    con = duckdb.connect(db_file)
+    try:
+        table = f"bronze.rest_{symbol.lower()}_funding_rate"
+        raw = con.execute(f"SELECT * FROM {table}").fetchdf()
+        if raw.empty:
+            return 0
+        bronze = pl.from_pandas(raw)
+        silver = bronze_funding_rate_to_silver(bronze, symbol=symbol, trade_type=trade_type)
+        if silver.is_empty():
+            return 0
+        con.execute("CREATE SCHEMA IF NOT EXISTS silver")
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS silver.funding_rate AS "
+            "SELECT * FROM silver.funding_rate WHERE FALSE"
+        )
+        con.execute("DELETE FROM silver.funding_rate WHERE symbol = ?", [symbol])
+        _silver_pd = silver.to_pandas()
+        con.execute("INSERT INTO silver.funding_rate SELECT * FROM _silver_pd")
+        return silver.height
+    finally:
+        con.close()
+
+
 @task
 def run_sqlmesh_plan(
     environment: str = "prod",
@@ -614,45 +761,64 @@ def dlt_sqlmesh_pipeline(
     symbol: str = "BTCUSDT",
     interval: str = "1h",
     trade_type: str = "spot",
+    data_type: str = "klines",
+    source: str = "rest",
     catalog_path: str | None = None,
 ) -> dict:
     """dlt → Polars transform → SQLMesh → DuckLake.
 
-    Stages:
-    1. dlt: fetch klines via Binance REST API → DuckDB bronze
-    2. Polars: transform bronze → silver, write to DuckDB silver
-    3. SQLMesh: run plan/apply for versioned silver model
-    4. DuckLake: catalog tracks silver tables (existing catalog.py)
+    Supports multiple data types and source backends:
+    - data_type: ``"klines"``, ``"aggTrades"``, ``"fundingRate"``
+    - source: ``"rest"`` (API), ``"archive"`` (ZIP), ``"ws"`` (streaming)
 
     Args:
         symbol: Trading pair.
-        interval: Kline interval.
+        interval: Kline interval (for klines only).
         trade_type: Market type (``"spot"``, ``"um"``, ``"cm"``).
+        data_type: Data type.
+        source: Source backend.
         catalog_path: Full path to ``catalog.duckdb``.
 
     Returns:
-        Dict with counts for each stage.
+        Dict with stage results.
     """
     db_path = catalog_path or str(
         (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
     )
 
-    print(f"  Stage 1: dlt — ingesting {symbol} {interval} {trade_type} klines")
-    dlt_result = run_dlt_source(symbol, interval, trade_type, db_path)
+    _STAGES: dict[str, tuple] = {
+        "klines": (run_dlt_source, transform_to_silver),
+        "aggTrades": (run_dlt_agg_trades, transform_agg_trades_to_silver),
+        "fundingRate": (run_dlt_funding_rate, transform_funding_rate_to_silver),
+    }
+    dlt_task, transform_task = _STAGES.get(data_type, (run_dlt_source, transform_to_silver))
+    _iv = interval if data_type == "klines" else None
+    _tt = "um" if data_type == "fundingRate" else trade_type
+
+    print(f"  Stage 1: dlt ({source}) — ingesting {symbol} {data_type}")
+    if source == "archive":
+        dlt_result = run_dlt_archive(symbol, _iv, _tt, db_path)
+    elif source == "ws":
+        dlt_result = run_dlt_ws(symbol, _iv, _tt, 100, db_path)
+    else:
+        dlt_result = dlt_task(symbol=symbol, trade_type=_tt, catalog_path=db_path)
     print(f"    dlt tables: {dlt_result['tables_loaded']}")
 
-    print("  Stage 2: Polars — transforming bronze → silver")
-    rows = transform_to_silver(symbol, interval, trade_type, db_path)
+    print(f"  Stage 2: Polars + Pandera — transforming {data_type} → silver")
+    kwargs = {"symbol": symbol, "trade_type": _tt, "catalog_path": db_path}
+    if data_type == "klines":
+        kwargs["interval"] = _iv
+    rows = transform_task(**kwargs)
     print(f"    silver rows: {rows}")
 
-    print("  Stage 3: SQLMesh — applying silver model")
+    print("  Stage 3: SQLMesh — applying model")
     sm_result = run_sqlmesh_plan()
     print(f"    SQLMesh applied: {sm_result['applied']}")
 
     return {
         "symbol": symbol,
-        "interval": interval,
-        "trade_type": trade_type,
+        "data_type": data_type,
+        "source": source,
         "dlt_tables": dlt_result["tables_loaded"],
         "silver_rows": rows,
         "sqlmesh_applied": sm_result["applied"],

@@ -14,9 +14,16 @@ Usage::
     SilverKlinesSchema.validate(df, lazy=True)
 """
 
-from binance_datatool.validation.schemas import BronzeKlinesSchema, SilverKlinesSchema
+from binance_datatool.validation.schemas import (
+    AggTradesSilverSchema,
+    BronzeKlinesSchema,
+    FundingRateSilverSchema,
+    SilverKlinesSchema,
+)
 
 __all__ = [
     "BronzeKlinesSchema",
     "SilverKlinesSchema",
+    "AggTradesSilverSchema",
+    "FundingRateSilverSchema",
 ]
