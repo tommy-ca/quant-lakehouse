@@ -554,7 +554,6 @@ def transform_to_silver(
     registered as a DuckDB view (zero-copy) then inserted via SQL.
     """
     import duckdb
-    import polars as pl
 
     from binance_datatool.transforms.klines import bronze_klines_to_silver
 
@@ -563,10 +562,9 @@ def transform_to_silver(
     )
     con = duckdb.connect(db_file)
     try:
-        raw = con.execute("SELECT * FROM bronze.klines WHERE symbol = ?", [symbol]).fetchdf()
-        if raw.empty:
+        bronze = con.execute("SELECT * FROM bronze.klines WHERE symbol = ?", [symbol]).pl()
+        if bronze.is_empty():
             return 0
-        bronze = pl.from_pandas(raw)
         silver = bronze_klines_to_silver(
             bronze, symbol=symbol, interval=interval, trade_type=trade_type
         )
@@ -663,7 +661,6 @@ def transform_agg_trades_to_silver(
 ) -> int:
     """Read bronze aggTrades from DuckDB, transform to Silver, write back."""
     import duckdb
-    import polars as pl
 
     from binance_datatool.transforms.agg_trades import bronze_agg_trades_to_silver
 
@@ -672,11 +669,7 @@ def transform_agg_trades_to_silver(
     )
     con = duckdb.connect(db_file)
     try:
-        table = f"bronze.rest_{symbol.lower()}_agg_trades"
-        raw = con.execute(f"SELECT * FROM {table}").fetchdf()
-        if raw.empty:
-            return 0
-        bronze = pl.from_pandas(raw)
+        bronze = con.execute(f"SELECT * FROM bronze.rest_{symbol.lower()}_agg_trades").pl()
         silver = bronze_agg_trades_to_silver(bronze, symbol=symbol, trade_type=trade_type)
         if silver.is_empty():
             return 0
@@ -701,7 +694,6 @@ def transform_funding_rate_to_silver(
 ) -> int:
     """Read bronze fundingRate from DuckDB, transform to Silver, write back."""
     import duckdb
-    import polars as pl
 
     from binance_datatool.transforms.funding_rate import bronze_funding_rate_to_silver
 
@@ -710,11 +702,7 @@ def transform_funding_rate_to_silver(
     )
     con = duckdb.connect(db_file)
     try:
-        table = f"bronze.rest_{symbol.lower()}_funding_rate"
-        raw = con.execute(f"SELECT * FROM {table}").fetchdf()
-        if raw.empty:
-            return 0
-        bronze = pl.from_pandas(raw)
+        bronze = con.execute(f"SELECT * FROM bronze.rest_{symbol.lower()}_funding_rate").pl()
         silver = bronze_funding_rate_to_silver(bronze, symbol=symbol, trade_type=trade_type)
         if silver.is_empty():
             return 0
