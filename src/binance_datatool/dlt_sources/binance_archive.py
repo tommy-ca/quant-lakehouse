@@ -183,8 +183,12 @@ def archive_data_resource(
     trade_type: TradeType = TradeType.spot,
     data_type: str = "klines",
     lookback_days: int | None = None,
+    catalog_path: str | None = None,
 ) -> dlt.Resource:
     """Build a dlt resource for one symbol from the Binance S3 archive.
+
+    Uses a DuckDB-backed file cache (``ArchiveFileCache``) when
+    ``catalog_path`` is provided — subsequent runs skip the S3 listing.
 
     Args:
         symbol: Trading pair.
@@ -192,6 +196,8 @@ def archive_data_resource(
         trade_type: Market type.
         data_type: One of ``"klines"``, ``"aggTrades"``, ``"trades"``, ``"fundingRate"``.
         lookback_days: Only process files newer than N days.
+        catalog_path: Path to ``catalog.duckdb`` for cache. When set, uses
+            cached file listings instead of S3 on subsequent runs.
 
     Returns:
         Configured ``dlt.Resource``.
@@ -200,20 +206,37 @@ def archive_data_resource(
     def _gen() -> list[list[dict[str, Any]]]:
         import aiohttp
 
-        client = ArchiveClient()
         freq = _data_freq_for(data_type, interval)
-        dt_enum = DataType(data_type)
+        freq_str = freq.value
         iv = interval if data_type == "klines" else None
 
-        files = asyncio.run(
-            client.list_symbol_files(
-                trade_type=trade_type,
-                data_freq=freq,
-                data_type=dt_enum,
-                symbol=symbol,
-                interval=iv,
+        # ── Resolve file list (cache or S3) ───────────────────────
+        if catalog_path:
+            from binance_datatool.workflow.archive_cache import ArchiveFileCache
+
+            cache = ArchiveFileCache(catalog_path)
+            cache.ensure_table()
+            if cache.is_fresh(symbol, data_type, iv, trade_type.value, freq_str):
+                files = cache.list_cached(symbol, data_type, iv, trade_type.value, freq_str)
+            else:
+                cache.refresh(symbol, data_type, iv, trade_type.value, freq_str)
+                files = cache.list_cached(symbol, data_type, iv, trade_type.value, freq_str)
+        else:
+            client = ArchiveClient()
+            dt_enum = DataType(data_type)
+            files_raw = asyncio.run(
+                client.list_symbol_files(
+                    trade_type=trade_type,
+                    data_freq=freq,
+                    data_type=dt_enum,
+                    symbol=symbol,
+                    interval=iv,
+                )
             )
-        )
+            files = [
+                {"key": f.key, "size": f.size, "last_modified": f.last_modified} for f in files_raw
+            ]
+
         if not files:
             return []
 
@@ -222,7 +245,11 @@ def archive_data_resource(
 
             _days = int(lookback_days)
             cutoff = datetime.now(UTC) - timedelta(days=_days)
-            files = [f for f in files if f.last_modified.replace(tzinfo=UTC) > cutoff]
+            files = [
+                f
+                for f in files
+                if (f.get("last_modified") and f["last_modified"].replace(tzinfo=UTC) > cutoff)
+            ]
 
         async def _fetch(url: str) -> str:
             async with (
@@ -236,7 +263,7 @@ def archive_data_resource(
 
         results: list[list[dict[str, Any]]] = []
         for f in files:
-            url = S3_DOWNLOAD_PREFIX + f.key
+            url = S3_DOWNLOAD_PREFIX + f["key"]
             try:
                 text = asyncio.run(_fetch(url))
                 rows = _parse_csv_rows(text, data_type, symbol, interval)

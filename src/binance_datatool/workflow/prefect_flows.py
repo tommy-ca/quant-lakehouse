@@ -634,6 +634,36 @@ def run_dlt_metadata(
     )
 
 
+@task
+def refresh_archive_cache(
+    symbol: str,
+    data_type: str = "klines",
+    interval: str | None = None,
+    trade_type: str = "spot",
+    catalog_path: str | None = None,
+) -> int:
+    """List S3 files for a symbol and cache in DuckDB metadata table.
+
+    Subsequent archive pipeline runs use the cache instead of S3 listing.
+    """
+    from binance_datatool.workflow.archive_cache import ArchiveFileCache
+
+    db_path = catalog_path or str(
+        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
+    )
+    _freq_map: dict[str, str] = {
+        "klines": "daily",
+        "aggTrades": "daily",
+        "trades": "daily",
+        "fundingRate": "monthly",
+    }
+    freq = _freq_map.get(data_type, "daily")
+    iv = interval if data_type == "klines" else None
+    cache = ArchiveFileCache(db_path)
+    cache.ensure_table()
+    return cache.refresh(symbol, data_type, iv, trade_type, freq)
+
+
 @task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
 def run_dlt_archive(
     symbol: str,
