@@ -30,7 +30,6 @@ from binance_datatool.exchange import (
     BinanceSpotRestClient,
     BinanceUmRestClient,
 )
-from binance_datatool.lineage import LineageTracker
 from binance_datatool.workflow import (
     ArchiveDownloadWorkflow,
     ArchiveListSymbolsWorkflow,
@@ -40,6 +39,7 @@ from binance_datatool.workflow import (
     SinkWorkflow,
 )
 from binance_datatool.workflow.health_check import check_ducklake_anomalies
+from binance_datatool.workflow.legacy.lineage import LineageTracker
 
 _DEFAULT_ARCHIVE_HOME = settings.archive_home
 

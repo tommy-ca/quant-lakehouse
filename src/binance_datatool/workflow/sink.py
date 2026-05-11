@@ -18,14 +18,14 @@ from typing import TYPE_CHECKING, Literal
 import polars as pl
 from loguru import logger
 
-from binance_datatool.lineage import LineageEvent, LineageEventType
-from binance_datatool.workflow.catalog import DuckLakeCatalog
+from binance_datatool.workflow.legacy.catalog import DuckLakeCatalog
+from binance_datatool.workflow.legacy.lineage import LineageEvent, LineageEventType
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from binance_datatool.common import DataType, TradeType
-    from binance_datatool.lineage import LineageTracker
+    from binance_datatool.workflow.legacy.lineage import LineageTracker
 
 _DEFAULT_CATALOG_PATH = "data/lake"
 

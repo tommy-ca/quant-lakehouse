@@ -85,7 +85,8 @@ Status: `⏳` pending, `🔄` in progress, `✅` done, `❌` cancelled
 
 **Upstream**: dlt sources infrastructure (Phase 0) is complete — 5 source modules,
 3 Polars transforms, 4 Pandera schemas, 3 Pydantic models, DuckLake destination,
-Prefect orchestration, archive cache, gap detection, explorer. 882 new-stack tests.
+Prefect orchestration, archive cache, gap detection, explorer. 283 new-stack tests
+(+ legacy tests moved alongside archived code to proposals/).
 
 ## Phase 7: CLI + dlt Integration
 
@@ -107,15 +108,10 @@ Prefect orchestration, archive cache, gap detection, explorer. 882 new-stack tes
 | ⏳ | 8.3 | FR | Health: replace archive-level checks with DuckLake anomaly detection |
 | ⏳ | 8.4 | FR | Metadata: replace `MetadataWorkflow` with `dlt` metadata sources |
 | ⏳ | 8.5 | D | Mark legacy workflows as deprecated in docstrings |
-
-## Phase 9: Legacy Code Retirement
-
-| Status | ID | Type | Description |
-|--------|----|------|-------------|
-| ⏳ | 9.1 | C | Move `datacontract.py` (443 LOC, unused) to `docs/proposals/` |
-| ⏳ | 9.2 | C | Move `lineage.py` (401 LOC, legacy-only) to `workflow/legacy/` |
-| ⏳ | 9.3 | C | Move `catalog.py` (DuckLakeCatalog, 365 LOC) to `workflow/legacy/` |
-| ⏳ | 9.4 | T | Keep legacy tests until legacy code is removed |
+| ✅ | 9.1 | C | Move `datacontract.py` (443 LOC, unused) to `docs/proposals/` |
+| ✅ | 9.2 | C | Move `lineage.py` (401 LOC, legacy-only) to `workflow/legacy/` |
+| ✅ | 9.3 | C | Move `catalog.py` (DuckLakeCatalog, 365 LOC) to `workflow/legacy/` |
+| ✅ | 9.4 | T | Keep legacy tests until legacy code is removed (moved tests alongside code) |
 | ⏳ | 9.5 | D | Update all docs to reference new stack as primary |
 
 ## Phase 10: Performance Optimization

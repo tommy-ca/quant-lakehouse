@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from binance_datatool.lineage import LineageEvent, LineageEventType
+from binance_datatool.workflow.legacy.lineage import LineageEvent, LineageEventType
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from binance_datatool.common.enums import TradeType
     from binance_datatool.common.types import KlineData
     from binance_datatool.exchange.client import ExchangeClient
-    from binance_datatool.lineage import LineageTracker
+    from binance_datatool.workflow.legacy.lineage import LineageTracker
 
 
 def _archive_path(

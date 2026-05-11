@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from binance_datatool.lineage import LineageEvent, LineageEventType, LineageTracker
+from binance_datatool.workflow.legacy.lineage import LineageEvent, LineageEventType, LineageTracker
 
 
 class TestLineageEvent:
