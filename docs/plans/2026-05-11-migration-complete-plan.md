@@ -8,7 +8,7 @@ status: proposal
 
 ## Current State
 
-| Layer | Legacy (3,367 LOC) | New Stack (2,500+ LOC) | Status |
+| Layer | Legacy (3,367 LOC) | New Stack (2,928+ LOC) | Status |
 |-------|-------------------|----------------------|--------|
 | CLI | `cli/archive.py` imports legacy workflows | dlt sources available but not wired to CLI | ⏹ Shared |
 | Download | `download.py` (226) — aria2 S3 download | `binance_archive.py` — dlt S3 download + parse | ✅ Parallel |
@@ -153,7 +153,7 @@ and continue to use aria2c. Only the unused ``DataContract``, ``LineageTracker``
 | Phase | Legacy Tests | New Stack Tests | Action |
 |-------|-------------|-----------------|--------|
 | 1 | `test_cli.py` (1,026) | Add dlt CLI tests | Extend, don't replace |
-| 2-5 | `test_archive_workflow.py` (801) | `test_dlt_sources.py` (229) + `test_transforms.py` (232) + `test_validation.py` (302) | Keep legacy tests until phases complete |
+| 2-5 | `test_archive_workflow.py` (801) | `test_dlt_sources.py` (229) + `test_transforms.py` (232) + `test_validation.py` (302) + `test_archive_cache.py` (119) = 882 total | Keep legacy tests until phases complete |
 | 6 | — | — | Remove tests for deleted code |
 
 **Principle**: Legacy tests stay until the corresponding legacy code is removed. New stack tests already cover the new functionality.

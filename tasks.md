@@ -83,6 +83,10 @@ Status: `⏳` pending, `🔄` in progress, `✅` done, `❌` cancelled
 
 ---
 
+**Upstream**: dlt sources infrastructure (Phase 0) is complete — 5 source modules,
+3 Polars transforms, 4 Pandera schemas, 3 Pydantic models, DuckLake destination,
+Prefect orchestration, archive cache, gap detection, explorer. 882 new-stack tests.
+
 ## Phase 7: CLI + dlt Integration
 
 | Status | ID | Type | Description |
@@ -135,7 +139,7 @@ Archive ZIP download comparison for dlt pipeline:
 | **aria2c** | N files/request, parallel, to-disk | ~21 files/s (16 conns) | ~5 min | ~1s | Medium (subprocess, disk I/O) |
 | **asyncio.gather** | N files/request, parallel, in-memory | ~16 files/s | ~6 min | ~1s | Low (stdlib) |
 
-**Recommendation**: Keep aiohttp for dlt (simple, matches dlt's in-memory resource pattern). For full backfill performance, add `asyncio.gather()` parallel fetch to the archive dlt resource (no new dependencies, ~10 lines of code change). aria2c adds subprocess + disk I/O complexity that isn't justified for the common incremental case.
+**Recommendation**: Keep aiohttp for dlt (simple, matches dlt's in-memory resource pattern). For full backfill performance, add `asyncio.gather()` parallel fetch to the archive dlt resource (no new dependencies, ~10 lines of code change). aria2c preserved in `archive/downloader.py` for batch CLI paths.
 
 ---
 
