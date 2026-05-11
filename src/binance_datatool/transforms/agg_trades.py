@@ -8,6 +8,11 @@ from typing import Literal
 import polars as pl
 
 
+def _exchange_for(trade_type: str) -> str:
+    mapping = {"spot": "binance-spot", "um": "binance-perps-um", "cm": "binance-perps-cm"}
+    return mapping.get(trade_type, "binance-spot")
+
+
 def bronze_agg_trades_to_silver(
     df: pl.DataFrame,
     *,
@@ -30,6 +35,7 @@ def bronze_agg_trades_to_silver(
         Silver-normalized DataFrame matching the DuckLake aggTrades schema.
     """
     now_us = int(datetime.now(UTC).timestamp() * 1_000_000)
+    exchange = _exchange_for(trade_type)
 
     return df.with_columns(
         [
@@ -46,7 +52,7 @@ def bronze_agg_trades_to_silver(
             pl.col("agg_trade_id").cast(pl.Int64),
             pl.lit("agg", dtype=pl.Utf8).alias("rtype"),
             pl.lit(source, dtype=pl.Utf8).alias("source"),
-            pl.lit("binance-spot", dtype=pl.Utf8).alias("exchange"),
+            pl.lit(exchange, dtype=pl.Utf8).alias("exchange"),
             pl.lit(trade_type, dtype=pl.Utf8).alias("trade_type"),
             pl.lit(symbol, dtype=pl.Utf8).alias("symbol"),
             pl.lit("aggTrades", dtype=pl.Utf8).alias("data_type"),

@@ -57,8 +57,8 @@ def archive_klines_resource(
     freq = DataFrequency.daily
     dtype_path = DataType.klines
 
-    pattern = home / "data" / tt_path / freq.value / dtype_path.value / symbol / interval / "*.zip"
-    zip_files = sorted(Path().glob(str(pattern))) if str(pattern) != "" else []
+    zip_dir = home / "data" / tt_path / freq.value / dtype_path.value / symbol / interval
+    zip_files = sorted(zip_dir.glob("*.zip")) if zip_dir.is_dir() else []
     if not zip_files:
         return
 

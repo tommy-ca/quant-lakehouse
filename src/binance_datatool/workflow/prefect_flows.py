@@ -563,8 +563,10 @@ def transform_to_silver(
     con = duckdb.connect(db_file)
     try:
         bronze = con.execute(
-            f"SELECT symbol, funding_time, funding_rate "
-            f"FROM bronze.rest_{symbol.lower()}_funding_rate"
+            "SELECT open_time, open, high, low, close, volume, close_time, "
+            "quote_volume, count, taker_buy_volume, taker_buy_quote_volume, "
+            "symbol, interval FROM bronze.btcusdt_klines WHERE symbol = ?",
+            [symbol],
         ).pl()
         if bronze.is_empty():
             return 0
