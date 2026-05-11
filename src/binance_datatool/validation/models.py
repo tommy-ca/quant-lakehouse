@@ -113,3 +113,31 @@ class FundingRateModel(BaseModel):
     symbol: str
     funding_time: int
     funding_rate: float
+
+
+class VenueModel(BaseModel):
+    """Pydantic model for venue metadata in dlt pipelines."""
+
+    dlt_config: ClassVar[DltConfig] = {"is_authoritative_model": True}
+
+    trade_type: str
+    data_types: str | None = None
+    frequencies: str | None = None
+    fetched_at: int
+
+
+class SymbolMetaModel(BaseModel):
+    """Pydantic model for symbol metadata in dlt pipelines."""
+
+    dlt_config: ClassVar[DltConfig] = {"is_authoritative_model": True}
+
+    symbol: str
+    trade_type: str
+    data_type: str
+    base_asset: str | None = None
+    quote_asset: str | None = None
+    contract_type: str | None = None
+    is_leverage: bool | None = None
+    is_stable_pair: bool | None = None
+    source: str
+    fetched_at: int

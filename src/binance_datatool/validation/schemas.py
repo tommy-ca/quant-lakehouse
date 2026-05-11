@@ -117,6 +117,38 @@ class FundingRateSilverSchema(pa.DataFrameModel):
     ts_date: object = pa.Field(nullable=False)
 
 
+class VenuesSchema(pa.DataFrameModel):
+    """Schema for venue metadata (trade type + data type discovery)."""
+
+    class Config:
+        coerce = True
+        strict = True
+
+    trade_type: str = pa.Field(nullable=False)
+    data_types: str = pa.Field(nullable=True)
+    frequencies: str = pa.Field(nullable=True)
+    fetched_at: int = pa.Field(ge=0, nullable=False)
+
+
+class SymbolsSchema(pa.DataFrameModel):
+    """Schema for symbol metadata (per-trade-type listing)."""
+
+    class Config:
+        coerce = True
+        strict = True
+
+    symbol: str = pa.Field(nullable=False)
+    trade_type: str = pa.Field(nullable=False)
+    data_type: str = pa.Field(nullable=False)
+    base_asset: str = pa.Field(nullable=True)
+    quote_asset: str = pa.Field(nullable=True)
+    contract_type: str = pa.Field(nullable=True)
+    is_leverage: bool = pa.Field(nullable=True)
+    is_stable_pair: bool = pa.Field(nullable=True)
+    source: str = pa.Field(nullable=False)
+    fetched_at: int = pa.Field(ge=0, nullable=False)
+
+
 # ── Cross-column validation helpers ──────────────────────────────
 
 
