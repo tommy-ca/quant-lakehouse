@@ -95,31 +95,14 @@ Prefect orchestration, archive cache, gap detection, explorer. 283 new-stack tes
 | ⏳ | 7.1 | FR | Add `--source` flag to CLI commands (auto/rest/archive/ws) |
 | ⏳ | 7.2 | FR | List-symbols via dlt metadata source (fallback to S3 listing) |
 | ⏳ | 7.3 | FR | List-files via ArchiveClient or DuckDB archive cache |
-| ⏳ | 7.4 | FR | Download via dlt archive source (aiohttp, in-memory) |
+| ✅ | 7.4 | FR | Download via dlt archive source (aiohttp, in-memory) — `run_dlt_archive` exists |
 | ⏳ | 7.5 | FR | Verify via dlt schema_contract + Pandera (not SHA256) |
 | ⏳ | 7.6 | NFR | Default `--source=auto` — detect dlt availability, fallback to legacy |
-
-## Phase 8: Workflow Consolidation
-
-| Status | ID | Type | Description |
-|--------|----|------|-------------|
-| ⏳ | 8.1 | FR | Sink: replace `SinkWorkflow` with `transforms/*.py` + `write_silver_table()` |
-| ⏳ | 8.2 | FR | Gap-fill: replace `GapFillWorkflow` with `dlt_sqlmesh_pipeline(source='rest')` |
+| ✅ | 8.2 | FR | Gap-fill: replace `GapFillWorkflow` with `dlt_sqlmesh_pipeline(source='rest')` |
 | ⏳ | 8.3 | FR | Health: replace archive-level checks with DuckLake anomaly detection |
-| ✅ | 8.4 | FR | Metadata: replace `MetadataWorkflow` with `dlt` metadata sources |
 | ⏳ | 8.5 | D | Mark legacy workflows as deprecated in docstrings |
-| ✅ | 9.1 | C | Move `datacontract.py` (443 LOC, unused) to `docs/proposals/` |
-| ✅ | 9.2 | C | Move `lineage.py` (401 LOC, legacy-only) to `workflow/legacy/` |
-| ✅ | 9.3 | C | Move `catalog.py` (DuckLakeCatalog, 365 LOC) to `workflow/legacy/` |
-| ✅ | 9.4 | T | Keep legacy tests until legacy code is removed (moved tests alongside code) |
-| ⏳ | 9.5 | D | Update all docs to reference new stack as primary |
-
-## Phase 10: Performance Optimization
-
-| Status | ID | Type | Description |
-|--------|----|------|-------------|
-| ⏳ | 10.1 | NFR | S3 listing: use DuckDB archive cache for subsequent runs (done: ArchiveFileCache) |
-| ⏳ | 10.2 | FR | Batch archive download via aria2c (keep existing code in `archive/downloader.py`) |
+| ✅ | 10.1 | NFR | S3 listing: use DuckDB archive cache for subsequent runs — `ArchiveFileCache` exists |
+| ✅ | 10.2 | FR | Batch archive download via aria2c (keep existing code in `archive/downloader.py`) |
 | ⏳ | 10.3 | NFR | Parallelize archive ZIP fetching in dlt resource (asyncio.gather) |
 | ⏳ | 10.4 | NFR | Add DuckLake table maintenance (CALL merge_adjacent_files) to Prefect flows |
 

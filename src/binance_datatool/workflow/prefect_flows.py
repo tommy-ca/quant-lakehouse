@@ -414,9 +414,32 @@ def gap_fill_flow(
     lookback_days: int = 30,
     archive_home: Path | None = None,
 ) -> int:
-    """Auto-detect and fill gaps. Wraps GapFillWorkflow with Prefect."""
-    tt = TradeType(trade_type)
-    gaps = fill_gaps(tt, symbol, data_type, interval, lookback_days, archive_home)
+    """Auto-detect and fill gaps. Uses dlt pipeline + DuckDB gap detection."""
+    tt_str = "um" if data_type == "fundingRate" else trade_type
+    db_path = str((_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve())
+
+    # Detect gaps using DuckDB bronze tables
+    from binance_datatool.workflow.gap_detection import detect_bronze_gaps
+
+    _table_map = {
+        "klines": f"bronze.{symbol.lower()}_klines",
+        "aggTrades": f"bronze.rest_{symbol.lower()}_agg_trades",
+        "fundingRate": f"bronze.rest_{symbol.lower()}_funding_rate",
+    }
+    table = _table_map.get(data_type, f"bronze.{symbol.lower()}_klines")
+    gaps = detect_bronze_gaps(db_path, table, [symbol], lookback_days)
+
+    if gaps:
+        # Use dlt pipeline to fill gaps (REST source, merge disposition)
+        from binance_datatool.workflow.prefect_flows import dlt_sqlmesh_pipeline
+
+        dlt_sqlmesh_pipeline(
+            symbol=symbol,
+            interval=interval or "1h",
+            trade_type=tt_str,
+            data_type=data_type,
+            source="rest",
+        )
     return len(gaps)
 
 
@@ -429,13 +452,30 @@ def sink_flow(
     archive_home: Path | None = None,
     catalog_path: Path | None = None,
 ) -> int:
-    """Sink to DuckLake. Wraps SinkWorkflow with Prefect."""
+    """Sink to DuckLake. Uses dlt transform when bronze tables exist,
+    falls back to legacy SinkWorkflow for file-based archive data."""
     tt = TradeType(trade_type)
-    home = archive_home or _DEFAULT_ARCHIVE_HOME
-    catalog = catalog_path or home.parent / "lake"
+    db_path = str(catalog_path / "catalog.duckdb") if catalog_path else None
+    _iv = interval if data_type == "klines" else None
     total = 0
     for sym in symbols:
-        total += sink_silver(tt, sym, data_type, interval, home, catalog)
+        # Try dlt path first (DuckDB bronze tables)
+        try:
+            import duckdb
+
+            con = duckdb.connect(db_path or ":memory:")
+            tbl = f"bronze.{sym.lower()}_klines" if data_type == "klines" else None
+            if tbl:
+                row = con.execute(f"SELECT COUNT(*) FROM {tbl}", []).fetchone()
+                if row and row[0] > 0:
+                    con.close()
+                    total += transform_to_silver(sym, _iv, trade_type, db_path)
+                    continue
+            con.close()
+        except Exception:
+            pass
+        # Fallback to legacy SinkWorkflow
+        total += sink_silver(tt, sym, data_type, _iv, 30, archive_home, catalog_path)
     return total
 
 
