@@ -190,9 +190,9 @@ Archive ZIP download comparison for dlt pipeline:
 
 | Status | ID | Type | Description |
 |--------|----|------|-------------|
-| ⏳ | 12.1 | FR | Create bronze_archive_index dlt source using dlt.filesystem |
-| ⏳ | 12.2 | FR | Create bronze.archive_files metadata table |
-| ⏳ | 12.3 | FR | Create Prefect refresh_archive_index flow (daily cron) |
+| ✅ | 12.1 | FR | Create bronze_archive_index dlt source — path parser + metadata extraction |
+| ✅ | 12.2 | FR | Create bronze.archive_files metadata table with symbol/data_type/interval/date |
+| ✅ | 12.3 | FR | Create Prefect refresh_archive_index flow (cron 0 */6 * * *) |
 
 ## Phase 13: Gold Layer (future)
 

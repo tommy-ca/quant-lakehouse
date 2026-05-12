@@ -1150,6 +1150,28 @@ def ducklake_maintenance_flow(
         con.close()
 
 
+# ── Bronze Archive Index ────────────────────────────────────────
+
+
+@task(retries=2, retry_delay_seconds=10)
+def refresh_archive_index(
+    archive_home: str | None = None,
+    catalog_path: str | None = None,
+) -> dict:
+    """Scan local archive mirror and update bronze.archive_files table."""
+    from binance_datatool.dlt_sources.bronze_archive_index import build_archive_index_source
+    from binance_datatool.dlt_sources.pipeline import run_source
+
+    source = build_archive_index_source(archive_home=archive_home)
+    return run_source(
+        source,
+        source_name="bronze_archive_index",
+        catalog_path=catalog_path
+        or str((_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()),
+        dataset_name="bronze",
+    )
+
+
 # ── Deployment Entry Points ─────────────────────────────────────
 
 if __name__ == "__main__":
@@ -1164,6 +1186,7 @@ if __name__ == "__main__":
             dlt_sqlmesh_pipeline.to_deployment(name="dlt-sqlmesh-e2e", cron="0 */12 * * *"),
             dlt_historical_pipeline.to_deployment(name="dlt-historical", cron="0 */6 * * *"),
             ducklake_maintenance_flow.to_deployment(name="ducklake-compact", cron="0 3 * * *"),
+            refresh_archive_index.to_deployment(name="archive-index", cron="0 */6 * * *"),
         )
     else:
         dlt_historical_pipeline()
