@@ -42,7 +42,7 @@ def bronze_funding_rate_to_silver(
             pl.col("funding_time").cast(pl.Int64).alias("ts_event"),
             pl.lit(now_us, dtype=pl.Int64).alias("ts_recv"),
             pl.col("funding_rate").cast(pl.Float64),
-            pl.lit(0.0, dtype=pl.Float64).alias("mark_price"),
+            pl.col("mark_price").cast(pl.Float64),
             pl.col("funding_time").cast(pl.Int64).alias("funding_timestamp"),
             pl.lit(source, dtype=pl.Utf8).alias("source"),
             pl.lit(exchange, dtype=pl.Utf8).alias("exchange"),

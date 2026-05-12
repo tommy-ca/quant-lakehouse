@@ -20,15 +20,15 @@ if TYPE_CHECKING:
     from binance_datatool.exchange.binance_rest import _BinanceRestClientBase
 
 
-from binance_datatool.validation.models import KlineModel
+from binance_datatool.validation.models import RawKlineModel
 
 
 @dlt.resource(
     name="klines",
     write_disposition="merge",
     primary_key=("symbol", "interval", "open_time"),
-    columns=KlineModel,
-    schema_contract={"columns": "freeze", "data_type": "freeze"},
+    columns=RawKlineModel,
+    schema_contract={"columns": "evolve", "data_type": "evolve"},
 )
 def klines_resource(
     symbol: str,
@@ -76,17 +76,19 @@ def klines_resource(
 
     return [
         {
-            "open_time": k.open_time,
-            "open": float(k.open),
-            "high": float(k.high),
-            "low": float(k.low),
-            "close": float(k.close),
-            "volume": float(k.volume),
-            "close_time": k.close_time,
-            "quote_volume": float(k.quote_volume),
-            "count": k.num_trades,
-            "taker_buy_volume": float(k.taker_buy_volume),
-            "taker_buy_quote_volume": float(k.taker_buy_quote_volume),
+            "open_time": str(k.open_time),
+            "open": k.open,
+            "high": k.high,
+            "low": k.low,
+            "close": k.close,
+            "volume": k.volume,
+            "close_time": str(k.close_time),
+            "quote_volume": k.quote_volume if k.quote_volume else None,
+            "count": str(k.num_trades),
+            "taker_buy_volume": k.taker_buy_volume if k.taker_buy_volume else None,
+            "taker_buy_quote_volume": k.taker_buy_quote_volume
+            if k.taker_buy_quote_volume
+            else None,
             "symbol": symbol,
             "interval": interval,
         }

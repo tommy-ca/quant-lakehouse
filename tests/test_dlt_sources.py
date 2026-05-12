@@ -31,8 +31,8 @@ class TestKlinesResource:
     def test_resource_has_column_schema(self):
         cols = klines_resource.columns
         assert cols is not None
-        assert cols["open_time"]["data_type"] == "bigint"
-        assert cols["open"]["data_type"] == "double"
+        assert cols["open_time"]["data_type"] == "text"
+        assert cols["symbol"]["data_type"] == "text"
 
     def test_build_binance_source_returns_dlt_source(self):
         source = build_binance_source(
@@ -88,7 +88,7 @@ class TestKlinesResource:
         assert any("klines" in n for n in names), f"no klines table: {names}"
         rows = con.execute("SELECT symbol, open, close FROM bronze.klines").fetchall()
         assert len(rows) == 1
-        assert rows[0] == ("BTCUSDT", 100.0, 100.5)
+        assert rows[0] == ("BTCUSDT", "100.0", "100.5")
         con.close()
 
     @patch("binance_datatool.dlt_sources.binance.BinanceSpotRestClient")
@@ -183,7 +183,7 @@ class TestRestResources:
         con = duckdb.connect(db)
         rows = con.execute("SELECT symbol, price, quantity FROM bronze.agg_trades").fetchall()
         assert len(rows) == 1
-        assert rows[0] == ("BTCUSDT", 50000.0, 0.5)
+        assert rows[0] == ("BTCUSDT", "50000.0", "0.5")
         con.close()
 
 

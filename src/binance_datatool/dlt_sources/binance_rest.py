@@ -14,7 +14,7 @@ import dlt
 
 from binance_datatool.common.enums import TradeType
 from binance_datatool.exchange.binance_rest import BinanceSpotRestClient
-from binance_datatool.validation.models import AggTradeModel, FundingRateModel
+from binance_datatool.validation.models import RawAggTradeModel, RawFundingRateModel
 
 
 def _client_for(trade_type: TradeType):
@@ -34,8 +34,8 @@ def _client_for(trade_type: TradeType):
     name="agg_trades",
     write_disposition="merge",
     primary_key=("symbol", "agg_trade_id"),
-    columns=AggTradeModel,
-    schema_contract={"columns": "freeze", "data_type": "freeze"},
+    columns=RawAggTradeModel,
+    schema_contract={"columns": "evolve", "data_type": "evolve"},
 )
 def agg_trades_resource(
     symbol: str,
@@ -43,16 +43,19 @@ def agg_trades_resource(
     start_time: int | None = None,
     end_time: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Fetch aggTrades from Binance REST API.
+    """Fetch aggTrades from Binance REST API (bronze raw).
+
+    Returns all fields as strings — no type casting. Schema evolution
+    is allowed at the bronze boundary. Type casting happens in Silver.
 
     Args:
         symbol: Trading pair.
         trade_type: Market type.
-        start_time: Epoch ms start (overrides default 0).
+        start_time: Epoch ms start.
         end_time: Epoch ms end.
 
     Returns:
-        List of aggTrade dicts.
+        List of aggTrade dicts (all values as strings).
     """
     client = _client_for(trade_type)
     raw_data = asyncio.run(
@@ -64,11 +67,13 @@ def agg_trades_resource(
     )
     return [
         {
-            "agg_trade_id": int(t["a"]),
-            "price": float(t["p"]),
-            "quantity": float(t["q"]),
-            "transact_time": int(t["T"]),
-            "is_buyer_maker": bool(t["m"]),
+            "agg_trade_id": str(t["a"]),
+            "price": str(t["p"]),
+            "quantity": str(t["q"]),
+            "first_trade_id": str(t.get("f", "")),
+            "last_trade_id": str(t.get("l", "")),
+            "transact_time": str(t["T"]),
+            "is_buyer_maker": str(t["m"]),
             "symbol": symbol,
         }
         for t in raw_data
@@ -79,8 +84,8 @@ def agg_trades_resource(
     name="funding_rate",
     write_disposition="merge",
     primary_key=("symbol", "funding_time"),
-    columns=FundingRateModel,
-    schema_contract={"columns": "freeze", "data_type": "freeze"},
+    columns=RawFundingRateModel,
+    schema_contract={"columns": "evolve", "data_type": "evolve"},
 )
 def funding_rate_resource(
     symbol: str,
@@ -88,7 +93,10 @@ def funding_rate_resource(
     start_time: int | None = None,
     end_time: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Fetch fundingRate from Binance REST API (um/cm only).
+    """Fetch fundingRate from Binance REST API (um/cm only) — bronze raw.
+
+    Returns all fields as strings. ``mark_price`` is preserved from
+    the API response (previously dropped).
 
     Args:
         symbol: Trading pair.
@@ -97,7 +105,7 @@ def funding_rate_resource(
         end_time: Epoch ms end.
 
     Returns:
-        List of funding rate dicts.
+        List of funding rate dicts (all values as strings).
     """
     client = _client_for(trade_type)
     raw_data = asyncio.run(
@@ -110,8 +118,9 @@ def funding_rate_resource(
     return [
         {
             "symbol": symbol,
-            "funding_time": int(t["fundingTime"]),
-            "funding_rate": float(t["fundingRate"]),
+            "funding_time": str(t["fundingTime"]),
+            "funding_rate": str(t["fundingRate"]),
+            "mark_price": str(t.get("markPrice", "")),
         }
         for t in raw_data
     ]

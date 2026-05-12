@@ -173,3 +173,30 @@ Archive ZIP download comparison for dlt pipeline:
 ### NFR-10: `test_adapter_binance.py` duplicates `FakeArchiveClient`
 - **Type**: T
 - **Status**: ❌ Skipped — `FakeBinanceArchiveClient` has minor differences (symbol/filename naming conventions, extra attrs). Only used in 1 skipped test. Not worth churn.
+
+---
+
+## Phase 11: Bronze Raw VARCHAR + Silver Promotion
+
+| Status | ID | Type | Description |
+|--------|----|------|-------------|
+| ✅ | 11.1 | FR | Create raw VARCHAR Pydantic models (RawKlineModel, RawAggTradeModel, RawFundingRateModel) |
+| ✅ | 11.2 | FR | Update REST dlt sources to use raw models + schema_contract="evolve" |
+| ✅ | 11.3 | FR | Update Silver transforms to parse VARCHAR→typed as first step |
+| ✅ | 11.4 | FR | Restore first_trade_id, last_trade_id, mark_price in silver |
+| ✅ | 11.5 | T | Tests + lint + commit (285 passing) |
+
+## Phase 12: Archive Bronze Index (next)
+
+| Status | ID | Type | Description |
+|--------|----|------|-------------|
+| ⏳ | 12.1 | FR | Create bronze_archive_index dlt source using dlt.filesystem |
+| ⏳ | 12.2 | FR | Create bronze.archive_files metadata table |
+| ⏳ | 12.3 | FR | Create Prefect refresh_archive_index flow (daily cron) |
+
+## Phase 13: Gold Layer (future)
+
+| Status | ID | Type | Description |
+|--------|----|------|-------------|
+| ⏳ | 13.1 | FR | Design gold views per analytics requirements |
+| ⏳ | 13.2 | FR | Implement gold views as SQLMesh models or Polars transforms |

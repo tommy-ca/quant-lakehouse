@@ -22,8 +22,11 @@ def bronze_agg_trades_to_silver(
 ) -> pl.DataFrame:
     """Transform bronze aggTrades DataFrame to Silver schema.
 
-    Input columns (from ``agg_trades_resource``):
-    ``agg_trade_id, price, quantity, transact_time, is_buyer_maker, symbol``
+    Handles both VARCHAR bronze input (strings) and typed input.
+    Includes ``first_trade_id`` and ``last_trade_id`` (previously dropped).
+
+    Input columns: ``agg_trade_id, price, quantity, transact_time,
+    is_buyer_maker, symbol``
 
     Args:
         df: Bronze aggTrades DataFrame.
@@ -43,13 +46,15 @@ def bronze_agg_trades_to_silver(
             pl.lit(now_us, dtype=pl.Int64).alias("ts_recv"),
             pl.col("price").cast(pl.Float64),
             pl.col("quantity").cast(pl.Float64).alias("size"),
-            pl.when(~pl.col("is_buyer_maker"))
+            pl.when(pl.col("is_buyer_maker").cast(pl.Boolean) == False)  # noqa: E712
             .then(pl.lit("buy"))
             .otherwise(pl.lit("sell"))
             .alias("side"),
             pl.col("agg_trade_id").cast(pl.Int64).alias("trade_id"),
             pl.col("is_buyer_maker").cast(pl.Int64),
             pl.col("agg_trade_id").cast(pl.Int64),
+            pl.col("first_trade_id").cast(pl.Int64),
+            pl.col("last_trade_id").cast(pl.Int64),
             pl.lit("agg", dtype=pl.Utf8).alias("rtype"),
             pl.lit(source, dtype=pl.Utf8).alias("source"),
             pl.lit(exchange, dtype=pl.Utf8).alias("exchange"),
@@ -72,6 +77,8 @@ def bronze_agg_trades_to_silver(
             "trade_id",
             "is_buyer_maker",
             "agg_trade_id",
+            "first_trade_id",
+            "last_trade_id",
             "rtype",
             "source",
             "exchange",

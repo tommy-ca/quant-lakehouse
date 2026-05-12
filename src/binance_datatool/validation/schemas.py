@@ -86,6 +86,8 @@ class AggTradesSilverSchema(pa.DataFrameModel):
     trade_id: int = pa.Field(ge=0, nullable=False)
     is_buyer_maker: int = pa.Field(nullable=False)
     agg_trade_id: int = pa.Field(ge=0, nullable=False)
+    first_trade_id: int = pa.Field(ge=0, nullable=False)
+    last_trade_id: int = pa.Field(ge=0, nullable=False)
     rtype: str = pa.Field(nullable=False)
     source: str = pa.Field(nullable=False)
     exchange: str = pa.Field(nullable=False)

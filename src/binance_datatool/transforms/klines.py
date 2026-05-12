@@ -7,7 +7,7 @@ from typing import Literal
 
 import polars as pl
 
-from binance_datatool.validation.schemas import validate_bronze_klines, validate_silver_klines
+from binance_datatool.validation.schemas import validate_silver_klines
 
 
 def bronze_klines_to_silver(
@@ -40,9 +40,6 @@ def bronze_klines_to_silver(
         Silver-normalized DataFrame with columns matching the DuckLake silver
         schema.
     """
-    if validate:
-        validate_bronze_klines(df)
-
     exchange = _exchange_for(trade_type)
     now_us = int(datetime.now(UTC).timestamp() * 1_000_000)
 

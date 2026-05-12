@@ -132,7 +132,6 @@ class SymbolMetaModel(BaseModel):
     dlt_config: ClassVar[DltConfig] = {"is_authoritative_model": True}
 
     symbol: str
-    trade_type: str
     data_type: str
     base_asset: str | None = None
     quote_asset: str | None = None
@@ -141,3 +140,63 @@ class SymbolMetaModel(BaseModel):
     is_stable_pair: bool | None = None
     source: str
     fetched_at: int
+
+
+# ── Bronze Raw Models (all TEXT, no validators) ─────────────────
+
+
+class RawKlineModel(BaseModel):
+    """Bronze-layer Pydantic model for klines — all TEXT, no validation.
+
+    Mirrors the upstream API response faithfully. Type casting and
+    business rules are enforced at the Silver boundary instead.
+    """
+
+    dlt_config: ClassVar[DltConfig] = {"is_authoritative_model": True}
+
+    open_time: str
+    open: str
+    high: str
+    low: str
+    close: str
+    volume: str
+    close_time: str
+    quote_volume: str | None = None
+    count: str | None = None
+    taker_buy_volume: str | None = None
+    taker_buy_quote_volume: str | None = None
+    symbol: str
+    interval: str
+
+
+class RawAggTradeModel(BaseModel):
+    """Bronze-layer Pydantic model for aggTrades — all TEXT, no validation.
+
+    Includes all fields from the upstream API: first_trade_id and
+    last_trade_id are preserved (previously dropped).
+    """
+
+    dlt_config: ClassVar[DltConfig] = {"is_authoritative_model": True}
+
+    agg_trade_id: str
+    price: str
+    quantity: str
+    first_trade_id: str | None = None
+    last_trade_id: str | None = None
+    transact_time: str
+    is_buyer_maker: str
+    symbol: str
+
+
+class RawFundingRateModel(BaseModel):
+    """Bronze-layer Pydantic model for fundingRate — all TEXT, no validation.
+
+    Includes mark_price from the upstream API (previously dropped).
+    """
+
+    dlt_config: ClassVar[DltConfig] = {"is_authoritative_model": True}
+
+    symbol: str
+    funding_time: str
+    funding_rate: str
+    mark_price: str | None = None
