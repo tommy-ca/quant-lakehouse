@@ -420,11 +420,11 @@ def gap_fill_flow(
     from binance_datatool.workflow.gap_detection import detect_bronze_gaps
 
     _table_map = {
-        "klines": f"bronze.{symbol.lower()}_klines",
-        "aggTrades": f"bronze.rest_{symbol.lower()}_agg_trades",
-        "fundingRate": f"bronze.rest_{symbol.lower()}_funding_rate",
+        "klines": "bronze.klines",
+        "aggTrades": "bronze.agg_trades",
+        "fundingRate": "bronze.funding_rate",
     }
-    table = _table_map.get(data_type, f"bronze.{symbol.lower()}_klines")
+    table = _table_map.get(data_type, "bronze.klines")
     gaps = detect_bronze_gaps(db_path, table, [symbol], lookback_days)
 
     if gaps:
@@ -462,7 +462,7 @@ def sink_flow(
             import duckdb
 
             con = duckdb.connect(db_path or ":memory:")
-            tbl = f"bronze.{sym.lower()}_klines" if data_type == "klines" else None
+            tbl = "bronze.klines" if data_type == "klines" else None
             if tbl:
                 row = con.execute(f"SELECT COUNT(*) FROM {tbl}", []).fetchone()
                 if row and row[0] > 0:
@@ -595,11 +595,11 @@ def detect_bronze_gaps(
     )
 
     _table_map = {
-        "klines": f"bronze.{symbol.lower()}_klines",
-        "aggTrades": f"bronze.rest_{symbol.lower()}_agg_trades",
-        "fundingRate": f"bronze.rest_{symbol.lower()}_funding_rate",
+        "klines": "bronze.klines",
+        "aggTrades": "bronze.agg_trades",
+        "fundingRate": "bronze.funding_rate",
     }
-    table = _table_map.get(data_type, f"bronze.{symbol.lower()}_klines")
+    table = _table_map.get(data_type, "bronze.klines")
     return _detect(db_path, table, [symbol], lookback_days)
 
 
@@ -616,9 +616,7 @@ def run_dlt_source(
 
     tt = TradeType(trade_type)
     source = build_binance_source(symbols=[symbol], interval=interval, trade_type=tt)
-    return run_source(
-        source, source_name=f"binance_{trade_type}_{symbol}", catalog_path=catalog_path
-    )
+    return run_source(source, source_name=f"binance_{trade_type}", catalog_path=catalog_path)
 
 
 @task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
@@ -641,7 +639,7 @@ def transform_to_silver(
         bronze = con.execute(
             "SELECT open_time, open, high, low, close, volume, close_time, "
             "quote_volume, count, taker_buy_volume, taker_buy_quote_volume, "
-            "symbol, interval FROM bronze.btcusdt_klines WHERE symbol = ?",
+            "symbol, interval FROM bronze.klines WHERE symbol = ?",
             [symbol],
         ).pl()
         if bronze.is_empty():
@@ -764,7 +762,7 @@ def run_dlt_archive(
 
     resource = archive_data_resource(symbol, s3_keys, interval=iv, data_type=data_type)
     return run_source(
-        resource, source_name=f"archive_{trade_type}_{symbol}", catalog_path=catalog_path
+        resource, source_name=f"archive_{trade_type}_{data_type}", catalog_path=catalog_path
     )
 
 
@@ -780,9 +778,7 @@ def run_dlt_agg_trades(
 
     tt = TradeType(trade_type)
     source = build_rest_source(symbols=[symbol], data_type="aggTrades", trade_type=tt)
-    return run_source(
-        source, source_name=f"agg_trades_{trade_type}_{symbol}", catalog_path=catalog_path
-    )
+    return run_source(source, source_name=f"agg_trades_{trade_type}", catalog_path=catalog_path)
 
 
 @task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
@@ -797,9 +793,7 @@ def run_dlt_funding_rate(
 
     tt = TradeType(trade_type)
     source = build_rest_source(symbols=[symbol], data_type="fundingRate", trade_type=tt)
-    return run_source(
-        source, source_name=f"funding_rate_{trade_type}_{symbol}", catalog_path=catalog_path
-    )
+    return run_source(source, source_name=f"funding_rate_{trade_type}", catalog_path=catalog_path)
 
 
 @task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
@@ -834,9 +828,9 @@ def transform_agg_trades_to_silver(
     con = get_connection(catalog_path=catalog_path)
     try:
         bronze = con.execute(
-            f"SELECT agg_trade_id, price, quantity, transact_time, "
-            f"is_buyer_maker, symbol "
-            f"FROM bronze.rest_{symbol.lower()}_agg_trades"
+            "SELECT agg_trade_id, price, quantity, transact_time, "
+            "is_buyer_maker, symbol "
+            "FROM bronze.agg_trades"
         ).pl()
         silver = bronze_agg_trades_to_silver(bronze, symbol=symbol, trade_type=trade_type)
         if silver.is_empty():
@@ -859,8 +853,7 @@ def transform_funding_rate_to_silver(
     con = get_connection(catalog_path=catalog_path)
     try:
         bronze = con.execute(
-            f"SELECT symbol, funding_time, funding_rate "
-            f"FROM bronze.rest_{symbol.lower()}_funding_rate"
+            "SELECT symbol, funding_time, funding_rate FROM bronze.funding_rate"
         ).pl()
         silver = bronze_funding_rate_to_silver(bronze, symbol=symbol, trade_type=trade_type)
         if silver.is_empty():

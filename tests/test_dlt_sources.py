@@ -86,7 +86,7 @@ class TestKlinesResource:
         ).fetchall()
         names = [t[0] for t in tables]
         assert any("klines" in n for n in names), f"no klines table: {names}"
-        rows = con.execute("SELECT symbol, open, close FROM bronze.BTCUSDT_klines").fetchall()
+        rows = con.execute("SELECT symbol, open, close FROM bronze.klines").fetchall()
         assert len(rows) == 1
         assert rows[0] == ("BTCUSDT", 100.0, 100.5)
         con.close()
@@ -181,9 +181,7 @@ class TestRestResources:
         import duckdb
 
         con = duckdb.connect(db)
-        rows = con.execute(
-            "SELECT symbol, price, quantity FROM bronze.rest_btcusdt_agg_trades"
-        ).fetchall()
+        rows = con.execute("SELECT symbol, price, quantity FROM bronze.agg_trades").fetchall()
         assert len(rows) == 1
         assert rows[0] == ("BTCUSDT", 50000.0, 0.5)
         con.close()
@@ -272,7 +270,7 @@ class TestPipeline:
                 "SELECT table_name FROM information_schema.tables WHERE table_schema='bronze'"
             ).fetchall()
         ]
-        assert any("btcusdt_klines" in t for t in tbls)
+        assert any("klines" in t for t in tbls)
         con.close()
 
     def test_all_trade_type_data_type_combos_um_funding(self, tmp_path):

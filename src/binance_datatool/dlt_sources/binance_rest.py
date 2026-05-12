@@ -140,7 +140,10 @@ def build_rest_source(
     else:
         raise ValueError(f"Unsupported REST data_type: {data_type}")
 
+    _table = "agg_trades" if data_type == "aggTrades" else "funding_rate"
     return [
-        resource(symbol=sym, trade_type=trade_type).with_name(f"rest_{sym}_{data_type}")
+        resource(symbol=sym, trade_type=trade_type)
+        .with_name(f"rest_{sym}_{data_type}")
+        .apply_hints(table_name=_table)
         for sym in symbols
     ]

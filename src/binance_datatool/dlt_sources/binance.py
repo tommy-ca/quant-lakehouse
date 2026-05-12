@@ -103,6 +103,9 @@ def build_binance_source(
 ) -> list[dlt.Resource]:
     """Build a dlt source for multiple Binance symbols.
 
+    All symbols write to a single ``klines`` table in DuckDB,
+    distinguished by the ``symbol`` column. No per-symbol tables.
+
     Args:
         symbols: Trading symbols to fetch.
         interval: Kline interval.
@@ -110,7 +113,7 @@ def build_binance_source(
         data_type: Data type ("klines", "aggTrades", "fundingRate").
 
     Returns:
-        A list of dlt Resources (one per symbol).
+        A list of dlt Resources (all writing to the same table).
     """
     if data_type != "klines":
         raise NotImplementedError(f"dlt source for {data_type} not yet implemented")
@@ -120,6 +123,8 @@ def build_binance_source(
             symbol=sym,
             interval=interval,
             trade_type=trade_type,
-        ).with_name(f"{sym}_klines")
+        )
+        .with_name(f"{sym}_klines")
+        .apply_hints(table_name="klines")
         for sym in symbols
     ]

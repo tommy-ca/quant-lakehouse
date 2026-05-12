@@ -148,8 +148,15 @@ def _parse_csv_rows(
 
 
 def _resource_kwargs(data_type: str) -> dict[str, Any]:
+    _table_map = {
+        "klines": "klines",
+        "aggTrades": "agg_trades",
+        "trades": "trades",
+        "fundingRate": "funding_rate",
+    }
     return {
         "name": f"archive_{data_type}",
+        "table_name": _table_map.get(data_type, data_type.replace("-", "_")),
         "write_disposition": "merge",
         "primary_key": _PRIMARY_KEYS[data_type],
         "columns": _DATA_TYPE_COLUMNS[data_type],
