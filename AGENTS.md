@@ -56,10 +56,16 @@ Each component handles its strength — no overlap:
 
 ```
 dlt Sources (5 modules)
-  ↓ Extract + Load into DuckLake bronze tables (Parquet + catalog)
+  ↓ Extract + Load into shared bronze tables (one per data type)
+        bronze.klines       (all trade types, all sources)
+        bronze.agg_trades   (all trade types, all sources)
+        bronze.funding_rate (all trade types, all sources)
 Polars transforms (3 modules)
   ↓ Bronze → Silver with Pandera validation at boundaries
-Arrow writes → DuckLake silver tables
+        silver.klines       (19 columns, normalized schema)
+        silver.agg_trades   (16 columns, normalized schema)
+        silver.funding_rate (12 columns, normalized schema)
+Arrow writes → DuckDB silver tables
   ↓
 Prefect orchestrates (dlt_sqlmesh_pipeline dispatcher)
   └─ data_type=klines       → rest/archive/ws → transform_to_silver
