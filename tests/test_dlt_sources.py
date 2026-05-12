@@ -227,3 +227,84 @@ class TestPipeline:
 
         source = build_binance_source(symbols=["BTCUSDT"], interval="1h")
         assert len(source.selected_resources) == 1
+
+    def test_all_trade_type_data_type_combos_spot_klines(self, tmp_path):
+        """Verify spot-klines produces correct tables."""
+        from unittest.mock import AsyncMock, patch
+
+        from binance_datatool.common.enums import TradeType
+        from binance_datatool.common.types import KlineData
+        from binance_datatool.dlt_sources.binance import build_binance_source
+
+        db = str(tmp_path / "spot_klines.duckdb")
+        client = AsyncMock()
+        client.fetch_ohlcv.return_value = [
+            KlineData(
+                1700000000000,
+                "100.0",
+                "101.0",
+                "99.0",
+                "100.5",
+                "1000.0",
+                1700003600000,
+                "100500.0",
+                500,
+                "600.0",
+                "60300.0",
+            )
+        ]
+        with patch("binance_datatool.dlt_sources.binance.BinanceSpotRestClient") as mc:
+            mc.return_value = client
+            source = build_binance_source(
+                symbols=["BTCUSDT"], interval="1h", trade_type=TradeType.spot
+            )
+            pipeline = build_pipeline(
+                "spot_klines", catalog_path=db, dataset_name="bronze", destination="duckdb"
+            )
+            info = pipeline.run(source)
+        assert info is not None
+        import duckdb
+
+        con = duckdb.connect(db)
+        tbls = [
+            t[0]
+            for t in con.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema='bronze'"
+            ).fetchall()
+        ]
+        assert any("btcusdt_klines" in t for t in tbls)
+        con.close()
+
+    def test_all_trade_type_data_type_combos_um_funding(self, tmp_path):
+        """Verify um-fundingRate produces correct tables."""
+        from unittest.mock import AsyncMock, patch
+
+        from binance_datatool.common.enums import TradeType
+        from binance_datatool.dlt_sources.binance_rest import build_rest_source
+
+        db = str(tmp_path / "um_funding.duckdb")
+        client = AsyncMock()
+        client.fetch_funding_rate.return_value = [
+            {"fundingTime": 1700000000000, "fundingRate": "0.0001"}
+        ]
+        with patch("binance_datatool.exchange.binance_rest.BinanceUmRestClient") as mc:
+            mc.return_value = client
+            source = build_rest_source(
+                symbols=["BTCUSDT"], data_type="fundingRate", trade_type=TradeType.um
+            )
+            pipeline = build_pipeline(
+                "um_funding", catalog_path=db, dataset_name="bronze", destination="duckdb"
+            )
+            info = pipeline.run(source)
+        assert info is not None
+        import duckdb
+
+        con = duckdb.connect(db)
+        tbls = [
+            t[0]
+            for t in con.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema='bronze'"
+            ).fetchall()
+        ]
+        assert any("funding_rate" in t for t in tbls)
+        con.close()
