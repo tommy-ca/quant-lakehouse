@@ -198,5 +198,5 @@ Archive ZIP download comparison for dlt pipeline:
 
 | Status | ID | Type | Description |
 |--------|----|------|-------------|
-| ⏳ | 13.1 | FR | Design gold views per analytics requirements |
-| ⏳ | 13.2 | FR | Implement gold views as SQLMesh models or Polars transforms |
+| 📋 | 13.1 | FR | Design gold views per analytics requirements (deferred) |
+| 📋 | 13.2 | FR | Implement gold views as SQLMesh models or Polars transforms (deferred) |
