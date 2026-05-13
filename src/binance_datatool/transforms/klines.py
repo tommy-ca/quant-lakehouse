@@ -7,6 +7,7 @@ from typing import Literal
 
 import polars as pl
 
+from binance_datatool.common.enums import exchange_for
 from binance_datatool.validation.schemas import validate_silver_klines
 
 
@@ -40,12 +41,16 @@ def bronze_klines_to_silver(
         Silver-normalized DataFrame with columns matching the DuckLake silver
         schema.
     """
-    exchange = _exchange_for(trade_type)
+    exchange = exchange_for(trade_type)
     now_us = int(datetime.now(UTC).timestamp() * 1_000_000)
+
+    # Detect timestamp unit: μs (16+ digits) vs ms (13 digits)
+    open_time_col = pl.col("open_time").cast(pl.Int64)
+    is_us = open_time_col >= 1_000_000_000_000_000
 
     result = df.with_columns(
         [
-            (pl.col("open_time").cast(pl.Int64) * 1000).alias("ts_event"),
+            pl.when(is_us).then(open_time_col).otherwise(open_time_col * 1000).alias("ts_event"),
             pl.lit(now_us, dtype=pl.Int64).alias("ts_recv"),
             pl.col("open").cast(pl.Float64),
             pl.col("high").cast(pl.Float64),
@@ -63,9 +68,9 @@ def bronze_klines_to_silver(
             pl.lit(interval, dtype=pl.Utf8).alias("interval"),
             pl.lit("klines", dtype=pl.Utf8).alias("data_type"),
             pl.lit(now_us, dtype=pl.Int64).alias("ingested_at"),
-            (pl.col("open_time").cast(pl.Int64) // 86_400_000)
-            .cast(pl.Int32)
-            .cast(pl.Date)
+            pl.when(is_us)
+            .then((open_time_col // 86_400_000_000).cast(pl.Int32).cast(pl.Date))
+            .otherwise((open_time_col // 86_400_000).cast(pl.Int32).cast(pl.Date))
             .alias("ts_date"),
         ]
     ).select(
@@ -96,13 +101,3 @@ def bronze_klines_to_silver(
         validate_silver_klines(result)
 
     return result
-
-
-def _exchange_for(trade_type: str) -> str:
-    """Map trade_type to DuckLake exchange path component."""
-    mapping = {
-        "spot": "binance-spot",
-        "um": "binance-perps-um",
-        "cm": "binance-perps-cm",
-    }
-    return mapping.get(trade_type, "binance-spot")

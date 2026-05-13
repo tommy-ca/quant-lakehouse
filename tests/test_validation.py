@@ -6,7 +6,7 @@ import polars as pl
 import pytest
 from pydantic import ValidationError
 
-from binance_datatool.validation.models import AggTradeModel, FundingRateModel, KlineModel
+from binance_datatool.dlt.models import AggTradeModel, FundingRateModel, KlineModel
 from binance_datatool.validation.schemas import (
     BronzeKlinesSchema,
     SilverKlinesSchema,

@@ -39,6 +39,18 @@ from binance_datatool.workflow import (
 )
 from binance_datatool.workflow.health_check import check_ducklake_anomalies
 from binance_datatool.workflow.legacy.lineage import LineageTracker
+from binance_datatool.workflow.prefect_tasks.extract import (
+    detect_gaps,
+    extract_agg_trades,
+    extract_archive,
+    extract_funding_rate,
+    extract_klines,
+)
+from binance_datatool.workflow.prefect_tasks.transform import (
+    transform_agg_trades,
+    transform_funding_rate,
+    transform_klines,
+)
 
 _DEFAULT_ARCHIVE_HOME = settings.archive_home
 
@@ -500,8 +512,8 @@ def refresh_metadata_flow(
 
         # dlt metadata source (preferred)
         from binance_datatool.common.enums import TradeType
+        from binance_datatool.dlt.destinations import run_source
         from binance_datatool.dlt_sources.binance_metadata import build_metadata_source
-        from binance_datatool.dlt_sources.pipeline import run_source
 
         source = build_metadata_source(trade_types=[TradeType(trade_type)])
         run_source(source, source_name="metadata_refresh", catalog_path=db_path)
@@ -581,26 +593,8 @@ def detect_bronze_gaps(
     lookback_days: int = 30,
     catalog_path: str | None = None,
 ) -> list[tuple[str, int, int]]:
-    """Detect date gaps in DuckDB bronze table for a symbol.
-
-    Returns gaps as ``(symbol, start_ms, end_ms)``. Empty list = no gaps.
-
-    Runs before dlt extraction so the pipeline can skip symbols with
-    complete data.
-    """
-    from binance_datatool.workflow.gap_detection import detect_bronze_gaps as _detect
-
-    db_path = catalog_path or str(
-        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
-    )
-
-    _table_map = {
-        "klines": "bronze.klines",
-        "aggTrades": "bronze.agg_trades",
-        "fundingRate": "bronze.funding_rate",
-    }
-    table = _table_map.get(data_type, "bronze.klines")
-    return _detect(db_path, table, [symbol], lookback_days)
+    """Detect date gaps in DuckDB bronze table for a symbol."""
+    return detect_gaps(symbol, data_type, lookback_days, catalog_path)
 
 
 @task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
@@ -611,12 +605,7 @@ def run_dlt_source(
     catalog_path: str | None = None,
 ) -> dict:
     """Run dlt pipeline to ingest Binance klines for one symbol."""
-    from binance_datatool.dlt_sources.binance import build_binance_source
-    from binance_datatool.dlt_sources.pipeline import run_source
-
-    tt = TradeType(trade_type)
-    source = build_binance_source(symbols=[symbol], interval=interval, trade_type=tt)
-    return run_source(source, source_name=f"binance_{trade_type}", catalog_path=catalog_path)
+    return extract_klines(symbol, interval, trade_type, catalog_path)
 
 
 @task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
@@ -626,32 +615,8 @@ def transform_to_silver(
     trade_type: str = "spot",
     catalog_path: str | None = None,
 ) -> int:
-    """Read bronze klines from DuckDB, transform to Silver, write back.
-
-    Uses Polars for the Bronze→Silver transform. The silver DataFrame is
-    registered as a DuckDB view (zero-copy) then inserted via SQL.
-    """
-    from binance_datatool.transforms.klines import bronze_klines_to_silver
-    from binance_datatool.workflow.db import get_connection, write_silver_table
-
-    con = get_connection(catalog_path=catalog_path)
-    try:
-        bronze = con.execute(
-            "SELECT open_time, open, high, low, close, volume, close_time, "
-            "quote_volume, count, taker_buy_volume, taker_buy_quote_volume, "
-            "symbol, interval FROM bronze.klines WHERE symbol = ?",
-            [symbol],
-        ).pl()
-        if bronze.is_empty():
-            return 0
-        silver = bronze_klines_to_silver(
-            bronze, symbol=symbol, interval=interval, trade_type=trade_type
-        )
-        if silver.is_empty():
-            return 0
-        return write_silver_table(con, "klines", silver.to_arrow(), symbol)
-    finally:
-        con.close()
+    """Read bronze klines from DuckDB, transform to Silver, write back."""
+    return transform_klines(symbol, interval, trade_type, catalog_path)
 
 
 @task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
@@ -660,18 +625,9 @@ def run_dlt_metadata(
     catalog_path: str | None = None,
 ) -> dict:
     """Run dlt pipeline to discover symbols from the archive."""
-    from binance_datatool.dlt_sources.binance_metadata import build_metadata_source
-    from binance_datatool.dlt_sources.pipeline import run_source
+    from binance_datatool.workflow.prefect_tasks.extract import extract_metadata
 
-    if trade_types is None:
-        trade_types = ["spot", "um", "cm"]
-    from binance_datatool.common.enums import TradeType
-
-    types = [TradeType(tt) for tt in trade_types]
-    source = build_metadata_source(trade_types=types)
-    return run_source(
-        source, source_name="metadata", catalog_path=catalog_path, dataset_name="metadata"
-    )
+    return extract_metadata(trade_types, catalog_path)
 
 
 @task
@@ -713,57 +669,8 @@ def run_dlt_archive(
     lookback_days: int | None = 7,
     catalog_path: str | None = None,
 ) -> dict:
-    """Run dlt pipeline to ingest Binance archive data for one symbol.
-
-    Pure EL flow:
-    1. Resolve S3 file keys (cache or live listing) — Prefect concern
-    2. Pass keys to dlt for download + parse — dlt concern
-    """
-    from binance_datatool.archive.client import ArchiveClient
-    from binance_datatool.common.enums import DataFrequency, DataType
-    from binance_datatool.dlt_sources.binance_archive import archive_data_resource
-    from binance_datatool.dlt_sources.pipeline import run_source
-    from binance_datatool.workflow.archive_cache import ArchiveFileCache
-
-    tt = TradeType(trade_type)
-    freq = DataFrequency.monthly if data_type == "fundingRate" else DataFrequency.daily
-    dt_enum = DataType(data_type)
-    iv = interval if data_type == "klines" else None
-
-    # Resolve file keys (cache-aware)
-    db_path = catalog_path or str(
-        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
-    )
-    cache = ArchiveFileCache(db_path)
-    cache.ensure_table()
-    freq_str = freq.value
-    if cache.is_fresh(symbol, data_type, iv, trade_type, freq_str):
-        files = cache.list_cached(symbol, data_type, iv, trade_type, freq_str)
-    else:
-        client = ArchiveClient()
-        raw_files = asyncio.run(client.list_symbol_files(tt, freq, dt_enum, symbol, interval=iv))
-        files = [{"key": f.key, "last_modified": f.last_modified} for f in raw_files]
-        cache.refresh(symbol, data_type, iv, trade_type, freq_str)
-
-    # Filter by lookback
-    if lookback_days is not None and files:
-        from datetime import UTC, datetime, timedelta
-
-        cutoff = datetime.now(UTC) - timedelta(days=int(lookback_days))
-        files = [
-            f
-            for f in files
-            if (f.get("last_modified") and f["last_modified"].replace(tzinfo=UTC) > cutoff)
-        ]
-
-    s3_keys = [f["key"] for f in files]
-    if not s3_keys:
-        return {"tables_loaded": [], "files_count": 0}
-
-    resource = archive_data_resource(symbol, s3_keys, interval=iv, data_type=data_type)
-    return run_source(
-        resource, source_name=f"archive_{trade_type}_{data_type}", catalog_path=catalog_path
-    )
+    """Run dlt pipeline to ingest Binance archive data for one symbol."""
+    return extract_archive(symbol, interval, trade_type, data_type, lookback_days, catalog_path)
 
 
 @task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
@@ -773,12 +680,7 @@ def run_dlt_agg_trades(
     catalog_path: str | None = None,
 ) -> dict:
     """Run dlt pipeline to ingest Binance aggTrades for one symbol."""
-    from binance_datatool.dlt_sources.binance_rest import build_rest_source
-    from binance_datatool.dlt_sources.pipeline import run_source
-
-    tt = TradeType(trade_type)
-    source = build_rest_source(symbols=[symbol], data_type="aggTrades", trade_type=tt)
-    return run_source(source, source_name=f"agg_trades_{trade_type}", catalog_path=catalog_path)
+    return extract_agg_trades(symbol, trade_type, catalog_path)
 
 
 @task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
@@ -788,12 +690,7 @@ def run_dlt_funding_rate(
     catalog_path: str | None = None,
 ) -> dict:
     """Run dlt pipeline to ingest Binance fundingRate for one symbol."""
-    from binance_datatool.dlt_sources.binance_rest import build_rest_source
-    from binance_datatool.dlt_sources.pipeline import run_source
-
-    tt = TradeType(trade_type)
-    source = build_rest_source(symbols=[symbol], data_type="fundingRate", trade_type=tt)
-    return run_source(source, source_name=f"funding_rate_{trade_type}", catalog_path=catalog_path)
+    return extract_funding_rate(symbol, trade_type, catalog_path)
 
 
 @task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
@@ -805,8 +702,8 @@ def run_dlt_ws(
     catalog_path: str | None = None,
 ) -> dict:
     """Run dlt pipeline to stream Binance klines via WebSocket for one symbol."""
-    from binance_datatool.dlt_sources.binance_ws import build_ws_source
-    from binance_datatool.dlt_sources.pipeline import run_source
+    from binance_datatool.dlt.destinations import run_source
+    from binance_datatool.dlt.sources import build_ws_source
 
     tt = TradeType(trade_type)
     source = build_ws_source(
@@ -822,22 +719,7 @@ def transform_agg_trades_to_silver(
     catalog_path: str | None = None,
 ) -> int:
     """Read bronze aggTrades from DuckDB, transform to Silver, write back."""
-    from binance_datatool.transforms.agg_trades import bronze_agg_trades_to_silver
-    from binance_datatool.workflow.db import get_connection, write_silver_table
-
-    con = get_connection(catalog_path=catalog_path)
-    try:
-        bronze = con.execute(
-            "SELECT agg_trade_id, price, quantity, transact_time, "
-            "is_buyer_maker, symbol "
-            "FROM bronze.agg_trades"
-        ).pl()
-        silver = bronze_agg_trades_to_silver(bronze, symbol=symbol, trade_type=trade_type)
-        if silver.is_empty():
-            return 0
-        return write_silver_table(con, "agg_trades", silver.to_arrow(), symbol)
-    finally:
-        con.close()
+    return transform_agg_trades(symbol, trade_type, catalog_path)
 
 
 @task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
@@ -847,20 +729,7 @@ def transform_funding_rate_to_silver(
     catalog_path: str | None = None,
 ) -> int:
     """Read bronze fundingRate from DuckDB, transform to Silver, write back."""
-    from binance_datatool.transforms.funding_rate import bronze_funding_rate_to_silver
-    from binance_datatool.workflow.db import get_connection, write_silver_table
-
-    con = get_connection(catalog_path=catalog_path)
-    try:
-        bronze = con.execute(
-            "SELECT symbol, funding_time, funding_rate FROM bronze.funding_rate"
-        ).pl()
-        silver = bronze_funding_rate_to_silver(bronze, symbol=symbol, trade_type=trade_type)
-        if silver.is_empty():
-            return 0
-        return write_silver_table(con, "funding_rate", silver.to_arrow(), symbol)
-    finally:
-        con.close()
+    return transform_funding_rate(symbol, trade_type, catalog_path)
 
 
 @task

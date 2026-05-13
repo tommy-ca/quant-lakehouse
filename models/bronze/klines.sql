@@ -5,13 +5,9 @@ MODEL (
 );
 
 -- Exposes dlt-ingested bronze klines as a SQLMesh model.
--- Reads from the physical DuckDB table created by dlt in the 'bronze' schema.
--- The table name matches the dlt resource name (e.g. BTCUSDT_klines).
--- SQLMesh resolves the physical table because this model has no upstream
--- SQLMesh dependencies — it references the DuckDB schema directly.
--- NOTE: This model assumes dlt loaded into a single table. If using
--- build_binance_source with multiple symbols, the table is named per symbol
--- and this VIEW must be adjusted accordingly.
+-- Reads from the unified DuckDB table created by dlt in the 'bronze' schema.
+-- All symbols write to a single bronze.klines table via build_binance_source()
+-- which applies .apply_hints(table_name="klines") to each resource.
 SELECT
   CAST(open_time AS BIGINT) AS open_time,
   CAST(open AS DOUBLE) AS open,
@@ -26,5 +22,5 @@ SELECT
   CAST(taker_buy_quote_volume AS DOUBLE) AS taker_buy_quote_volume,
   symbol,
   interval
-FROM bronze.BTCUSDT_klines
+FROM bronze.klines
 WHERE open_time IS NOT NULL

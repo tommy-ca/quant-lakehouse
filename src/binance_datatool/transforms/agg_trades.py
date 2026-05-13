@@ -7,10 +7,7 @@ from typing import Literal
 
 import polars as pl
 
-
-def _exchange_for(trade_type: str) -> str:
-    mapping = {"spot": "binance-spot", "um": "binance-perps-um", "cm": "binance-perps-cm"}
-    return mapping.get(trade_type, "binance-spot")
+from binance_datatool.common.enums import exchange_for
 
 
 def bronze_agg_trades_to_silver(
@@ -38,7 +35,7 @@ def bronze_agg_trades_to_silver(
         Silver-normalized DataFrame matching the DuckLake aggTrades schema.
     """
     now_us = int(datetime.now(UTC).timestamp() * 1_000_000)
-    exchange = _exchange_for(trade_type)
+    exchange = exchange_for(trade_type)
 
     return df.with_columns(
         [
@@ -46,15 +43,26 @@ def bronze_agg_trades_to_silver(
             pl.lit(now_us, dtype=pl.Int64).alias("ts_recv"),
             pl.col("price").cast(pl.Float64),
             pl.col("quantity").cast(pl.Float64).alias("size"),
-            pl.when(pl.col("is_buyer_maker").cast(pl.Boolean) == False)  # noqa: E712
+            pl.when(pl.col("is_buyer_maker").cast(pl.Utf8).str.to_lowercase() == "false")
             .then(pl.lit("buy"))
             .otherwise(pl.lit("sell"))
             .alias("side"),
             pl.col("agg_trade_id").cast(pl.Int64).alias("trade_id"),
-            pl.col("is_buyer_maker").cast(pl.Int64),
+            pl.when(pl.col("is_buyer_maker").cast(pl.Utf8).str.to_lowercase() == "true")
+            .then(pl.lit(1, pl.Int64))
+            .otherwise(pl.lit(0, pl.Int64))
+            .alias("is_buyer_maker"),
             pl.col("agg_trade_id").cast(pl.Int64),
-            pl.col("first_trade_id").cast(pl.Int64),
-            pl.col("last_trade_id").cast(pl.Int64),
+            pl.col("first_trade_id")
+            .cast(pl.Utf8)
+            .str.replace(r"^\s*$", "0")
+            .cast(pl.Int64)
+            .alias("first_trade_id"),
+            pl.col("last_trade_id")
+            .cast(pl.Utf8)
+            .str.replace(r"^\s*$", "0")
+            .cast(pl.Int64)
+            .alias("last_trade_id"),
             pl.lit("agg", dtype=pl.Utf8).alias("rtype"),
             pl.lit(source, dtype=pl.Utf8).alias("source"),
             pl.lit(exchange, dtype=pl.Utf8).alias("exchange"),

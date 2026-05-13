@@ -6,7 +6,13 @@ from binance_datatool.common.constants import (
     S3_HTTP_TIMEOUT_SECONDS,
     S3_LISTING_PREFIX,
 )
-from binance_datatool.common.enums import ContractType, DataFrequency, DataType, TradeType
+from binance_datatool.common.enums import (
+    ContractType,
+    DataFrequency,
+    DataType,
+    TradeType,
+    exchange_for,
+)
 from binance_datatool.common.filter import (
     CmSymbolFilter,
     SpotSymbolFilter,
@@ -53,6 +59,7 @@ __all__ = [
     "UmSymbolInfo",
     "VALID_INTERVALS",
     "configure_cli_logging",
+    "exchange_for",
     "infer_cm_info",
     "infer_spot_info",
     "infer_um_info",

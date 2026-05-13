@@ -16,8 +16,8 @@ Our Silver layer schema is shown with its source convention for each field.
 
 | binance-datatool | Binance Archive CSV | Binance REST API | tardis.dev | DBN (OhlcvMsg) |
 |---|---|---|---|---|
-| `ts_event` INT64 ms | `open_time` | `[0]` | `timestamp` (μs) | `ts_event` (ns) |
-| `ts_recv` INT64 ms | — | — | `local_timestamp` (μs) | `ts_recv` (ns) |
+| `ts_event` INT64 μs | `open_time` | `[0]` | `timestamp` (μs) | `ts_event` (ns) |
+| `ts_recv` INT64 μs | — | — | `local_timestamp` (μs) | `ts_recv` (ns) |
 | `open` FLOAT64 | `open` | `[1]` | — | `open` i64 1e-9 |
 | `high` FLOAT64 | `high` | `[2]` | — | `high` i64 1e-9 |
 | `low` FLOAT64 | `low` | `[3]` | — | `low` i64 1e-9 |
@@ -32,8 +32,8 @@ Our Silver layer schema is shown with its source convention for each field.
 | `symbol` VARCHAR | file name | `symbol` | `symbol` | `instrument_id` u32 |
 | `interval` VARCHAR | file name | `interval` | — | `rtype` (OHLCV_1H etc.) |
 | `data_type` VARCHAR | file path | — | — | `schema` |
-| `ingested_at` INT64 ms | — | — | — | — |
-| `ts_date` DATE | — | — | — | — |
+| `ingested_at` INT64 μs | — | — | — | — |
+
 
 **Timestamp comparison**: `1778256000000` (ms) = `1778256000000000` (μs tardis.dev) = `1778256000000000000` (ns DBN)
 
@@ -45,8 +45,8 @@ Our Silver layer schema is shown with its source convention for each field.
 
 | binance-datatool | Binance Archive CSV | Binance REST API | tardis.dev | DBN (TradeMsg) |
 |---|---|---|---|---|
-| `ts_event` INT64 ms | `transact_time` | `T` | `timestamp` (μs) | `ts_event` (ns) |
-| `ts_recv` INT64 ms | — | — | `local_timestamp` (μs) | `ts_recv` (ns) |
+| `ts_event` INT64 μs | `transact_time` | `T` | `timestamp` (μs) | `ts_event` (ns) |
+| `ts_recv` INT64 μs | — | — | `local_timestamp` (μs) | `ts_recv` (ns) |
 | `price` FLOAT64 | `price` | `p` | `price` | `price` i64 1e-9 |
 | `size` FLOAT64 | `quantity` | `q` | `amount` | `size` u32 |
 | `side` VARCHAR | `is_buyer_maker` | `m` | `side` | `action` + `side` |
@@ -57,7 +57,7 @@ Our Silver layer schema is shown with its source convention for each field.
 | `exchange` VARCHAR | — | — | `exchange` | `publisher_id` u16 |
 | `symbol` VARCHAR | file name | `s` | `symbol` | `instrument_id` u32 |
 | `data_type` VARCHAR | file path | — | — | `schema` (Trades) |
-| `ingested_at` INT64 ms | — | — | — | — |
+| `ingested_at` INT64 μs | — | — | — | — |
 
 **tardis.dev `amount`**: Our `size` maps to tardis.dev `amount`. DBN also uses `size`. Binance uses `quantity`.
 
@@ -72,16 +72,16 @@ Our Silver layer schema is shown with its source convention for each field.
 
 | binance-datatool | Binance Archive CSV | Binance REST API | tardis.dev | DBN |
 |---|---|---|---|---|
-| `ts_event` INT64 ms | `funding_time` | `fundingTime` | `timestamp` (μs) | — |
-| `ts_recv` INT64 ms | — | — | `local_timestamp` (μs) | — |
+| `ts_event` INT64 μs | `funding_time` | `fundingTime` | `timestamp` (μs) | — |
+| `ts_recv` INT64 μs | — | — | `local_timestamp` (μs) | — |
 | `funding_rate` FLOAT64 | `funding_rate` | `fundingRate` | `funding_rate` | — |
 | `mark_price` FLOAT64 | `mark_price` | `markPrice` | `mark_price` | — |
-| `funding_timestamp` INT64 ms | `funding_time` | `fundingTime` | `funding_timestamp` (μs) | — |
+| `funding_timestamp` INT64 μs | `funding_time` | `fundingTime` | `funding_timestamp` (μs) | — |
 | `exchange` VARCHAR | — | — | `exchange` | — |
 | `symbol` VARCHAR | `symbol` | `symbol` | `symbol` | — |
 | `trade_type` VARCHAR | file path | — | — | — |
 | `data_type` VARCHAR | file path | — | — | — |
-| `ingested_at` INT64 ms | — | — | — | — |
+| `ingested_at` INT64 μs | — | — | — | — |
 
 **tardis.dev has additional fields** we could add:
 - `predicted_funding_rate`: next-next funding rate estimate
@@ -97,16 +97,16 @@ Our Silver layer schema is shown with its source convention for each field.
 
 | Concept | binance-datatool | tardis.dev | DBN |
 |---|---|---|---|
-| Exchange ID | `exchange` VARCHAR: `"binance"`, `"binance-futures"`, `"binance-delivery"` | `exchange` VARCHAR: same values | `publisher_id` u16: numeric IDs |
+| Exchange ID | `exchange` VARCHAR: `"binance-spot"`, `"binance-perps-um"`, `"binance-perps-cm"` | `exchange` VARCHAR: same values | `publisher_id` u16: numeric IDs |
 | Market type | `trade_type` VARCHAR: `"spot"`, `"um"`, `"cm"` | Encoded in exchange ID | Encoded in `publisher_id` |
 | Trading pair | `symbol` VARCHAR: `"BTCUSDT"` | `symbol` VARCHAR: same | `instrument_id` u32 + `raw_symbol` |
 
 **tardis.dev exchange mapping**:
 | tardis.dev ID | binance-datatool `exchange` | binance-datatool `trade_type` |
 |---|---|---|
-| `binance` | `binance` | `spot` |
-| `binance-futures` | `binance-futures` | `um` |
-| `binance-delivery` | `binance-delivery` | `cm` |
+| `binance` | `binance-spot` | `spot` |
+| `binance-perps-um` | `binance-perps-um` | `um` |
+| `binance-perps-cm` | `binance-perps-cm` | `cm` |
 
 ---
 
@@ -114,13 +114,13 @@ Our Silver layer schema is shown with its source convention for each field.
 
 | Source | Unit | Example (2026-05-08 00:00:00 UTC) |
 |---|---|---|
-| binance-datatool | **ms** | `1778256000000` |
+| binance-datatool | **μs** | `1778256000000000` |
 | Binance archive | **ms** | `1778256000000` |
 | Binance REST API | **ms** | `1778256000000` |
 | tardis.dev | **μs** | `1778256000000000` |
 | DBN | **ns** | `1778256000000000000` |
 
-**Conversion**: multiply/divide by 1000 between adjacent units.
+**Conversion**: multiply/divide by 1000 between adjacent units. binance-datatool stores timestamps as `ts_event`/`ts_recv` in epoch μs (INT64).
 
 ---
 

@@ -48,9 +48,9 @@ def detect_bronze_gaps(
         for symbol in symbols:
             try:
                 existing = con.execute(
-                    f"SELECT DISTINCT CAST(open_time / 86400000 AS BIGINT) AS day "
+                    f"SELECT DISTINCT CAST(CAST(open_time AS BIGINT) / 86400000 AS BIGINT) AS day "
                     f"FROM {table_name} WHERE symbol = ? "
-                    f"AND open_time BETWEEN ? AND ? "
+                    f"AND CAST(open_time AS BIGINT) BETWEEN ? AND ? "
                     f"ORDER BY day",
                     [symbol, window_start, window_end],
                 ).fetchall()

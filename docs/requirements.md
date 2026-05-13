@@ -833,7 +833,64 @@ All future work should reference this document and follow the TDD + audit checkl
 
 ---
 
-**Document Version**: 1.0
-**Last Updated**: 2026-05-07
+### Phase 14: Schema Audit & Consolidation (2026-05-12)
+
+**Goal**: Eliminate schema drift, naming inconsistencies, and YAGNI code across the bronze/silver
+layer boundary. Single source of truth for exchange naming.
+
+**Changes**:
+- ✅ Consolidated `_exchange_for()` (4 copies with 2 conventions) → single `exchange_for()` in `common/enums.py`
+- ✅ Fixed AggTradesSilverSchema.ts_date and FundingRateSilverSchema.ts_date from `object` → `pl.Date`
+- ✅ Added missing `BronzeAggTradesSchema` and `BronzeFundingRateSchema` Pandera schemas
+- ✅ Aligned DuckLakeCatalog TABLE_DEFS with actual silver transform output (first_trade_id, last_trade_id restored; stale interval removed)
+- ✅ Fixed SQLMesh bronze model (hardcoded `BTCUSDT_klines` → `bronze.klines`)
+- ✅ Fixed gap_detection.py VARCHAR handling in `CAST(open_time / 86400000 AS BIGINT)`
+- ✅ Removed unused `IcebergCatalog` (~150 lines) and analytics views (YAGNI)
+- ✅ Fixed SDK response access in `binance_rest.py` (dict subscript → attribute access for `AggTradesResponse` and `GetFundingRateHistoryResponse`)
+- ✅ Fixed S3 download URL in `binance_archive.py` (missing `/` between prefix and key)
+- ✅ 11 new tests for agg_trades and funding_rate transforms (previously 0 coverage)
+- ✅ 7/7 REST E2E pipeline scenarios validated (klines spot/um, aggTrades spot/um, fundingRate um/cm)
+- ✅ 1/3 archive E2E scenarios validated (klines spot 1d from S3 ZIP)
+- ✅ Silver schema validated: exchange=DuckLake convention, ts_date=DATE, first_trade_id/last_trade_id restored, mark_price preserved
+
+**Current baseline**: 308 tests, lint clean, format clean
+
+### Phase 16: Archive Column Completeness (2026-05-12)
+
+**Goal**: Ensure archive dlt sources preserve all CSV columns to bronze tables. Previous `_DATA_TYPE_COLUMNS`
+definitions were missing fields that `_BRONZE_COLS` included, causing silent data loss.
+
+**Changes**:
+- ✅ Fixed aggTrades `_BRONZE_COLS` — added `is_buyer_maker`, `is_best_match` (8 columns total, matching `sink.py`)
+- ✅ Fixed aggTrades `_DATA_TYPE_COLUMNS` — added `first_trade_id`, `last_trade_id`, `is_buyer_maker`, `is_best_match`
+- ✅ Fixed fundingRate `_DATA_TYPE_COLUMNS` — added `mark_price`, `funding_interval_hours`
+- ✅ All E2E validation confirms silver schema integrity: exchange naming, ts_date type, first/last_trade_id, mark_price
+
+### Phase 18: E2E Data Correctness Pipeline (2026-05-12)
+
+**Goal**: Formal reusable E2E correctness test suite validating the full raw→bronze→silver pipeline
+with field-level mappings for all data types × trade types.
+
+**Changes**:
+- ✅ Created `tests/test_e2e_correctness.py` — 8 integration tests across REST klines (spot/um), REST aggTrades (spot/um), REST fundingRate (um/cm), Archive klines (spot), cross-table schema
+- ✅ Fixed archive μs timestamp detection: Binance archive switched from ms (13-digit) to μs (16-digit). `open_time >= 1e15` → μs path for both `ts_event` and `ts_date`
+- ✅ Fixed empty `mark_price` in CM fundingRate: empty strings replaced with "0" before Float64 cast
+- ✅ 308 unit tests passing, 8/8 integration tests passing
+- ✅ Run with: `uv run pytest tests/test_e2e_correctness.py --run-integration -v`
+
+**E2E Correctness Flow**:
+```
+dlt REST/Archive source
+  ↓ raw REST/CSV → DuckDB bronze (VARCHAR/typed)
+  ↓ Polars transform (bronze_*_to_silver)
+  ↓ Pandera schema validation (column types, cross-column checks)
+  ↓ DuckDB silver tables
+  ↓ Assertions: exchange naming, ts_date type, field mappings, side derivation
+```
+
+---
+
+**Document Version**: 1.2
+**Last Updated**: 2026-05-12
 **Maintainer**: Team
-**Status**: Complete. SDK migration → pipeline hardening → E2E validation done.
+**Status**: Complete. Schema audit → DRY consolidation → archive column completeness → E2E data correctness pipeline.

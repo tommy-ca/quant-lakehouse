@@ -43,12 +43,12 @@ Each component handles its strength — no overlap:
 
 | Component | Role | Module |
 |-----------|------|--------|
-| **dlt** | Extract + Load (pagination, retries, incremental state, schema inference, S3 listing) | `binance_datatool.dlt_sources` — 6 modules: REST klines, REST aggTrades, REST fundingRate, S3 archive, WS streaming, metadata |
+| **dlt** | Extract + Load (pagination, retries, incremental state, schema inference, S3 listing) | `binance_datatool.dlt` — resources (5 per-data-type modules), sources (unified builders), models (Pydantic), destinations (DuckDB/DuckLake) |
 | **Polars** | Bronze→Silver transforms (type casting, column renaming, timestamp normalization) | `binance_datatool.transforms` — 3 modules: klines, aggTrades, fundingRate |
-| **Pandera** | DataFrame-level validation at pipeline boundaries (column types, nullability, cross-column checks) | `binance_datatool.validation.schemas` — 4 schemas: bronze klines, silver klines, silver aggTrades, silver fundingRate |
-| **Pydantic** | Per-record validation within dlt resources (business rules, type coercion, authoritative schema) | `binance_datatool.validation.models` — 3 models: KlineModel, AggTradeModel, FundingRateModel |
+| **Pandera** | DataFrame-level validation at pipeline boundaries (column types, nullability, cross-column checks) | `binance_datatool.validation.schemas` — 6 schemas: bronze klines/aggTrades/fundingRate, silver klines/aggTrades/fundingRate |
+| **Pydantic** | Per-record validation within dlt resources (business rules, type coercion, authoritative schema) | `binance_datatool.dlt.models` — 8 models: KlineModel, AggTradeModel, FundingRateModel, VenueModel, SymbolMetaModel, Raw* models |
 | **SQLMesh** | Versioned SQL transforms (INCREMENTAL_BY_TIME_RANGE models, audits for data quality, column-level lineage) | `models/` — bronze/silver models, audits; optional via `dlt_sqlmesh_pipeline` |
-| **Prefect** | Orchestration (flow composition, parallelism, retries, concurrency guards, DLQ, cron scheduling) | `binance_datatool.workflow.prefect_flows` — 10+ tasks, 9 flows, cron deployments |
+| **Prefect** | Orchestration (flow composition, parallelism, retries, concurrency guards, DLQ, cron scheduling) | `binance_datatool.workflow.prefect_flows` (thin @flow defs) + `workflow.prefect_tasks` (importable business logic) |
 | **DuckLake** | Primary storage — lakehouse with Parquet files + sqlite catalog. dlt destination by default. Handles partitioning, ACID, snapshots automatically. | `dlt.destinations.ducklake()` — managed by dlt; no manual catalog setup needed |
 | **DuckDB** | Legacy/fallback storage — single-file database. Used for unit tests and backward compatibility. | `dlt.destinations.duckdb()` — use via explicit `destination="duckdb"` |
 
@@ -119,6 +119,11 @@ All commands use `uv run` — never `pip`, `uv pip`, or bare `python3`:
   metadata tracking, and holographic kline generation.
 - Design commands to be atomic and composable so an agent can inspect state and then choose the
   next step.
+- **Prefect tasks are thin wrappers**: business logic lives in `workflow/prefect_tasks/` as plain
+  importable functions. `prefect_flows.py` contains only `@flow` and `@task` decorators that
+  delegate to these functions. This makes the business logic testable and reusable without Prefect.
+- **dlt package is standalone**: `binance_datatool.dlt` can be imported independently of the rest
+  of the package. It provides models, resources, source builders, and destination helpers.
 
 ## Testing Expectations
 - Add or update tests for every meaningful behavior change.
@@ -322,6 +327,19 @@ Standalone flows:
 | S3 listing is slow for full archive | `binance_archive.py:72` | Lists ALL files before filtering by lookback | Use `lookback_days=7` to limit processing. Full listing for BTCUSDT 1d = ~6400 files, ~30s |
 | WS streaming blocks in sync context | `binance_ws.py` | Stream runs in asyncio.run() bridge | WS is realtime-only; 1m candles take up to 60s. Use REST for batch. |
 | DuckLake is default destination | `pipeline.py:29` | dlt sources now default to ``destination="ducklake"`` | Pass ``destination="duckdb"`` to revert to single-file DuckDB |
+| **EXCHANGE NAMING** — canonical function | `common/enums.py:exchange_for()` | Legacy sink used tardis.dev convention (`"binance"`, `"binance-futures"`); transforms used DuckLake convention (`"binance-spot"`, `"binance-perps-um"`) | Fixed — all paths now use `exchange_for(trade_type)` from `common/enums.py`. DuckLake convention is canonical. |
+| Pandera `ts_date` typed `object` | `validation/schemas.py:98,119` | AggTradesSilverSchema and FundingRateSilverSchema used `object` instead of `pl.Date` | Fixed — both now use `pl.Date` matching SilverKlinesSchema |
+| Missing bronze Pandera schemas | `validation/schemas.py` | No BronzeAggTradesSchema or BronzeFundingRateSchema existed | Added — both now mirror RawAggTradeModel/RawFundingRateModel with VARCHAR-only columns |
+| SQLMesh bronze model hardcoded symbol | `models/bronze/klines.sql:29` | Referenced `bronze.BTCUSDT_klines` (single-symbol only) | Fixed — now references `bronze.klines` which all symbols write to via `.apply_hints(table_name="klines")` |
+| DuckLake TABLE_DEFS missing restored columns | `catalog.py` TABLE_DEFS | `aggTrades` was missing `first_trade_id`, `last_trade_id`; had stale `interval` column | Fixed — aligned with actual silver schemas (18 columns for aggTrades, 12 for fundingRate) |
+| Unused `IcebergCatalog` (YAGNI) | `catalog.py` | Fully implemented Iceberg catalog class, never imported anywhere | Removed — moved to ARCHIVED. Analytics views SQL also removed. |
+| gap_detection VARCHAR handling | `gap_detection.py:51` | `CAST(open_time / 86400000 AS BIGINT)` fails when `open_time` is VARCHAR | Fixed — `CAST(CAST(open_time AS BIGINT) / 86400000 AS BIGINT)` handles both TEXT and numeric |
+| CM klines symbol naming | `exchange/binance_rest.py` | CM futures use `BTCUSD_PERP` not `BTCUSDT` — E2E test with BTCUSDT fails | Use correct per-market symbol: spot/um use `BTCUSDT`, cm uses `BTCUSD_PERP` |
+| S3 download URL missing slash | `binance_archive.py:196` | `S3_DOWNLOAD_PREFIX + key` produced `data.binance.visiondata/...` (no separator) | Fixed — now uses f-string with `/` separator |
+| Archive aggTrades `_DATA_TYPE_COLUMNS` missing fields | `binance_archive.py:89-95` | `is_buyer_maker`, `first_trade_id`, `last_trade_id` not in type defs → silently dropped during dlt ingest | Fixed — added all CSV columns to `_DATA_TYPE_COLUMNS` |
+| Archive fundingRate `_DATA_TYPE_COLUMNS` missing `mark_price` | `binance_archive.py:104-108` | `mark_price` not in type defs → silently dropped | Fixed — added `mark_price` and `funding_interval_hours` |
+| Archive klines `open_time` μs vs ms | `transforms/klines.py` | Binance archive switched from ms (13-digit) to μs (16-digit). `ts_date` computed as `open_time // 86400000` fails for μs → year 58327 | Fixed — auto-detect: `open_time >= 1e15` is μs, divide by 86400000000 instead of 86400000 |
+| Empty `mark_price` in fundingRate | `transforms/funding_rate.py:42` | CM fundingRate API returns empty strings for mark_price → `cast(Float64)` fails | Fixed — `str.replace("", "0")` before cast |
 
 ## Data Sources
 
@@ -336,13 +354,25 @@ the complete field-to-source mapping matrix.
 
 ### Data Type Coverage
 
-| Type | Archive | REST API | Sink | Table | Notes |
-|------|---------|----------|------|-------|-------|
-| klines | ✓ daily zips | ✓ | ✓ | `klines` | 1h/1d intervals |
-| aggTrades | ✓ daily zips | ✓ | ✓ | `aggTrades` | 8-field CSV |
-| trades | ✓ daily zips | ✓ | ✓ | `aggTrades` | 7-field CSV, same table |
-| fundingRate | ✓ monthly zips | ✓ | ✓ | `fundingRate` | 3-field CSV, has header |
-| bookDepth/bookTicker/... | empty dirs | ✗ | ✗ | — | No data in archive |
+| Type | Archive | REST API | WS Stream | Sink/Transform | Silver Table | E2E Validated |
+|------|---------|----------|-----------|----------------|--------------|---------------|
+| klines (spot) | ✓ daily zips | ✓ via `build_binance_source` | ✓ via `ws_klines_resource` | ✓ `bronze_klines_to_silver` | `silver.klines` | ✅ REST (1000 rows) + Archive (1 file, μs detected) |
+| klines (um) | ✓ daily zips | ✓ via `build_binance_source` | ✓ via `ws_klines_resource` | ✓ `bronze_klines_to_silver` | `silver.klines` | ✅ REST (2000 rows) |
+| klines (cm) | ✓ daily zips | ✓ via `build_binance_source` | ✓ via `ws_klines_resource` | ✓ `bronze_klines_to_silver` | `silver.klines` | ⚠ (BTCUSD_PERP naming) |
+| aggTrades (spot) | ✓ daily zips | ✓ via `build_rest_source` | — | ✓ `bronze_agg_trades_to_silver` | `silver.agg_trades` | ✅ REST (500 rows) |
+| aggTrades (um) | ✓ daily zips | ✓ via `build_rest_source` | — | ✓ `bronze_agg_trades_to_silver` | `silver.agg_trades` | ✅ REST (1000 rows) |
+| fundingRate (um) | ✓ monthly zips | ✓ via `build_rest_source` | — | ✓ `bronze_funding_rate_to_silver` | `silver.funding_rate` | ✅ REST (100 rows) |
+| fundingRate (cm) | ✓ monthly zips | ✓ via `build_rest_source` | — | ✓ `bronze_funding_rate_to_silver` | `silver.funding_rate` | ✅ REST (100 rows) |
+| trades | ✓ daily zips | — | — | ✓ (legacy `sink.py`) | `silver.agg_trades` | ⏳ (no dlt source yet) |
+| bookDepth/... | empty dirs | ✗ | ✗ | ✗ | — | No data in archive |
+
+### Silver Schema Column Counts (validated)
+
+| Silver Table | Columns | Includes |
+|-------------|---------|----------|
+| `silver.klines` | 19 | ts_event, ts_recv, open, high, low, close, volume, quote_volume, trade_count, taker_buy_volume, taker_buy_quote_volume, source, exchange, trade_type, symbol, interval, data_type, ingested_at, ts_date |
+| `silver.agg_trades` | 18 | ts_event, ts_recv, price, size, side, trade_id, is_buyer_maker, agg_trade_id, first_trade_id, last_trade_id, rtype, source, exchange, trade_type, symbol, data_type, ingested_at, ts_date |
+| `silver.funding_rate` | 12 | ts_event, ts_recv, funding_rate, mark_price, funding_timestamp, source, exchange, trade_type, symbol, data_type, ingested_at, ts_date |
 
 ### Archive Structure (data.binance.vision)
 
@@ -381,24 +411,24 @@ HealthCheckWorkflow → completeness, freshness, integrity
 SinkWorkflow → Polars → DuckLake v1.0
 ```
 
-### dlt Pipeline (new, Prefect-orchestrated: ``dlt_sqlmesh_pipeline``)
+### dlt Pipeline (Prefect-orchestrated: ``dlt_sqlmesh_pipeline``)
 
 ```
-dlt sources (one per layer):
-  REST klines    ─┐
-  REST aggTrades ─┤
-  REST fundingRt ├──→ DuckDB Bronze
-  Archive ZIPs   ─┤
-  WS streaming   ─┘
-                      ↓
-Polars transforms + Pandera validation:
+dlt resources (from binance_datatool.dlt.resources):
+  klines_resource     ─┐
+  agg_trades_resource ─┤  → DuckDB Bronze (one table per data type)
+  funding_rate_res.   ─┤
+  archive_data_res.   ─┤
+  ws_klines_resource  ─┘
+           ↓
+Polars transforms (from binance_datatool.transforms):
   bronze_klines_to_silver()        → silver.klines
   bronze_agg_trades_to_silver()   → silver.agg_trades
   bronze_funding_rate_to_silver() → silver.funding_rate
-                      ↓
-DuckDB Silver tables (same catalog.duckdb)
-                      ↓
-SQLMesh versioned models + audits (optional)
+           ↓
+Pandera validation (at Polars boundary)
+           ↓
+DuckDB Silver tables (via storage.duckdb)
 ```
 
 ### Validation Layer (``binance_datatool.validation``)
@@ -406,8 +436,10 @@ SQLMesh versioned models + audits (optional)
 | Layer | Pandera Schema | Pydantic Model | Enforces |
 |-------|---------------|----------------|----------|
 | Bronze klines | ``BronzeKlinesSchema`` | ``KlineModel`` | types, nullability, ge/le, high>=low |
+| Bronze aggTrades | ``BronzeAggTradesSchema`` | ``RawAggTradeModel`` | VARCHAR-only columns, nullability |
+| Bronze fundingRate | ``BronzeFundingRateSchema`` | ``RawFundingRateModel`` | VARCHAR-only columns, nullability |
 | Silver klines | ``SilverKlinesSchema`` | — | 19 silver columns, cross-column checks |
-| Silver aggTrades | ``AggTradesSilverSchema`` | — | 16 columns, price>0, size>=0 |
+| Silver aggTrades | ``AggTradesSilverSchema`` | — | 18 columns, price>0, size>=0, include first/last_trade_id |
 | Silver fundingRate | ``FundingRateSilverSchema`` | — | 12 columns |
 | dlt REST klines | — | ``KlineModel`` | pydantic field validators (dlt authoritative) |
 | dlt REST aggTrades | — | ``AggTradeModel`` | price>0, quantity>=0 |
@@ -525,6 +557,7 @@ binance-datatool refresh-metadata spot --catalog /path/to/lake --duckdb /path/to
 - **HealthCheckWorkflow**: Scans local archive for completeness (missing dates), freshness (staleness), integrity (checksums)
 - **Lineage**: Every data operation records `LineageEvent` via `LineageTracker` (exportable to JSON)
 - **DuckLake catalog**: Uses official DuckLake v1.0 format (`ATTACH 'ducklake:metadata.ducklake'`). Lake views scan Parquet in-place via `read_parquet()` — zero copy, no data duplication.
+- **Canonical exchange naming**: All pipeline paths use ``exchange_for(trade_type)`` from ``common/enums.py`` — the single source of truth for DuckLake exchange names (``"binance-spot"``, ``"binance-perps-um"``, ``"binance-perps-cm"``). Legacy ``sink.py`` now uses this function too. Eliminates data inconsistency between pipeline paths.
 
 ## Silver Layer (Transform/Normalize)
 
@@ -546,7 +579,7 @@ Databento DBN and tardis.dev conventions.
 | `taker_buy_volume` | CSV column | FLOAT64 | Maker buy volume |
 | `taker_buy_quote_volume` | CSV column | FLOAT64 | Maker buy quote volume |
 | `source` | Auto | UTF8 | `"archive"`, `"api_filled"`, `"ws_stream"` |
-| `exchange` | Auto | UTF8 | `"binance"`, `"binance-futures"`, `"binance-delivery"` |
+| `exchange` | Auto | UTF8 | `"binance-spot"`, `"binance-perps-um"`, `"binance-perps-cm"` |
 | `trade_type` | Auto | UTF8 | `"spot"`, `"um"`, `"cm"` |
 | `symbol` | Auto | UTF8 | e.g. `"BTCUSDT"` |
 | `interval` | Auto | UTF8 | e.g. `"1h"` |
@@ -587,6 +620,56 @@ binance-datatool refresh-metadata spot --catalog /path/to/lake
 # From REST API (richer metadata: status, contract type)
 binance-datatool refresh-metadata um --from-api --catalog /path/to/lake
 ```
+
+## E2E Data Correctness Pipeline
+
+The canonical E2E correctness test suite lives at `tests/test_e2e_correctness.py`. It validates
+the full raw→bronze→silver pipeline with field-level mappings for all data types × trade types.
+
+### Test Matrix
+
+| Test Class | Data Types | Trade Types | Validates |
+|------------|-----------|-------------|-----------|
+| `TestRestKlinesCorrectness` | klines | spot, um | bronze columns, ts_event, ts_date, exchange, source, field types |
+| `TestRestAggTradesCorrectness` | aggTrades | spot, um | bronze columns, side derivation, size mapping, first/last_trade_id, rtype |
+| `TestRestFundingRateCorrectness` | fundingRate | um, cm | bronze columns, mark_price, funding_timestamp, exchange |
+| `TestArchiveKlinesCorrectness` | klines (archive ZIP) | spot | bronze columns, μs auto-detection, ts_event, ts_date, exchange |
+| `TestCrossTableConsistency` | all | — | ts_date=DATE type, exchange=DuckLake convention across all tables |
+
+### Running
+
+```bash
+# Full E2E suite (makes real Binance API calls + S3 requests)
+uv run pytest tests/test_e2e_correctness.py --run-integration -v
+
+# Unit tests only (no network)
+uv run pytest tests/ -q
+```
+
+### Data Flow (raw → bronze → silver)
+
+```
+REST API (Binance SDK)
+  ↓ klines_resource / agg_trades_resource / funding_rate_resource
+  ↓ dlt pipeline (write_disposition="merge", schema_contract="evolve")
+DuckDB bronze tables (all VARCHAR: open_time TEXT, price TEXT, ...)
+  ↓ bronze_klines_to_silver() / bronze_agg_trades_to_silver() / bronze_funding_rate_to_silver()
+  ↓ Polars type casting + field renaming + metadata enrichment
+  ↓ Pandera schema validation (SilverKlinesSchema / AggTradesSilverSchema / FundingRateSilverSchema)
+DuckDB silver tables (typed: ts_event BIGINT, price DOUBLE, ...)
+  ↓ Assertions: column presence, exchange naming, ts_date type, field mapping correctness
+
+Archive (S3 ZIP)
+  ↓ archive_data_resource() — dlt fetch + CSV parse
+  ↓ DuckDB bronze (typed: open_time BIGINT, open DOUBLE, ...)
+  ↓ Same Polars transforms + μs auto-detection
+  ↓ Same silver schema + assertions
+```
+
+### Known Data Correctness Issues (Resolved)
+- **Archive μs timestamps**: Binance switched from ms (13-digit) to μs (16-digit) in archive CSVs. Transform auto-detects via `open_time >= 1e15` and uses correct divisor (86400000000 vs 86400000).
+- **Empty mark_price**: CM fundingRate API may return empty strings for `mark_price`. Transform replaces `""` with `"0"` before Float64 cast.
+- **First/last_trade_id restored**: Previously dropped in aggTrades silver; now preserved from REST API and archive CSV.
 
 ## Repository Boundaries
 - `temp/` is git-ignored and may contain temporary or non-public materials.

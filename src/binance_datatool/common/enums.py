@@ -73,6 +73,29 @@ class DataType(StrEnum):
         }
 
 
+_DUCKLAKE_EXCHANGE_NAMES: dict[str, str] = {
+    "spot": "binance-spot",
+    "um": "binance-perps-um",
+    "cm": "binance-perps-cm",
+}
+
+
+def exchange_for(trade_type: str) -> str:
+    """Canonical exchange name for DuckLake catalog paths.
+
+    Returns the DuckLake-compatible exchange name for a given trade type.
+    This is the SINGLE source of truth for exchange naming across all
+    pipeline paths (legacy sink + dlt transforms).
+
+    Args:
+        trade_type: ``"spot"``, ``"um"``, or ``"cm"``.
+
+    Returns:
+        Exchange name string (e.g. ``"binance-spot"``, ``"binance-perps-um"``).
+    """
+    return _DUCKLAKE_EXCHANGE_NAMES.get(trade_type, "binance-spot")
+
+
 class ContractType(StrEnum):
     """Futures contract settlement style."""
 

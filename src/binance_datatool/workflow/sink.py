@@ -18,7 +18,8 @@ from typing import TYPE_CHECKING, Literal
 import polars as pl
 from loguru import logger
 
-from binance_datatool.workflow.legacy.catalog import DuckLakeCatalog
+from binance_datatool.common.enums import exchange_for
+from binance_datatool.storage.catalog import DuckLakeCatalog
 from binance_datatool.workflow.legacy.lineage import LineageEvent, LineageEventType
 
 if TYPE_CHECKING:
@@ -279,17 +280,6 @@ def _rename_to_silver(df: pl.DataFrame, mapping: dict[str, str]) -> pl.DataFrame
     return df
 
 
-def _exchange_for(trade_type: str) -> str:
-    """Map trade_type to exchange name (tardis.dev convention).
-
-    https://docs.tardis.dev/downloadable-csv-files/data-types
-    tardis.dev exchange IDs: binance, binance-futures, binance-delivery
-    """
-    return {"spot": "binance", "um": "binance-futures", "cm": "binance-delivery"}.get(
-        trade_type, "binance"
-    )
-
-
 def _add_silver_metadata(
     df: pl.DataFrame,
     trade_type: str,
@@ -300,7 +290,7 @@ def _add_silver_metadata(
 ) -> pl.DataFrame:
     """Add Silver metadata columns."""
     now_us = int(time.time() * 1_000_000)
-    exchange = _exchange_for(trade_type)
+    exchange = exchange_for(trade_type)
     df = df.with_columns(pl.lit(now_us).alias("ts_recv"))
     df = df.with_columns(
         pl.lit(source).alias("source"),

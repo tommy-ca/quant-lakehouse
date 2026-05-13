@@ -18,7 +18,7 @@ import dlt
 
 from binance_datatool.archive.client import ArchiveClient
 from binance_datatool.common.enums import DataFrequency, DataType, TradeType
-from binance_datatool.validation.models import SymbolMetaModel, VenueModel
+from binance_datatool.dlt.models import SymbolMetaModel, VenueModel
 from binance_datatool.workflow.list_symbols import ArchiveListSymbolsWorkflow
 
 ALL_TRADE_TYPES = [TradeType.spot, TradeType.um, TradeType.cm]

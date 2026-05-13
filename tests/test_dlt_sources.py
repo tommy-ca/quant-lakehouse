@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from binance_datatool.common.enums import TradeType
 from binance_datatool.common.types import KlineData
 from binance_datatool.dlt_sources.binance import build_binance_source, klines_resource
@@ -44,11 +42,13 @@ class TestKlinesResource:
         assert "BTCUSDT_klines" in resources
         assert "ETHUSDT_klines" in resources
 
-    def test_build_binance_source_raises_for_unsupported_types(self):
-        with pytest.raises(NotImplementedError, match="aggTrades"):
-            build_binance_source(symbols=["BTCUSDT"], data_type="aggTrades")
+    def test_build_binance_source_handles_all_data_types(self):
+        for dt in ("klines", "aggTrades", "fundingRate"):
+            src = build_binance_source(symbols=["BTCUSDT"], data_type=dt, trade_type=TradeType.spot)
+            assert src is not None
+            assert len(src.selected_resources) == 1
 
-    @patch("binance_datatool.dlt_sources.binance.BinanceSpotRestClient")
+    @patch("binance_datatool.exchange.binance_rest.BinanceSpotRestClient")
     def test_resource_via_pipeline(self, mock_client_cls, tmp_path):
         mock_client = AsyncMock()
         mock_client.fetch_ohlcv.return_value = [
@@ -74,7 +74,7 @@ class TestKlinesResource:
             "test_klines", catalog_path=db, dataset_name="bronze", destination="duckdb"
         )
         with patch(
-            "binance_datatool.dlt_sources.binance.BinanceSpotRestClient", return_value=mock_client
+            "binance_datatool.exchange.binance_rest.BinanceSpotRestClient", return_value=mock_client
         ):
             pipeline.run(source)
 
@@ -91,7 +91,7 @@ class TestKlinesResource:
         assert rows[0] == ("BTCUSDT", "100.0", "100.5")
         con.close()
 
-    @patch("binance_datatool.dlt_sources.binance.BinanceSpotRestClient")
+    @patch("binance_datatool.exchange.binance_rest.BinanceSpotRestClient")
     def test_resource_empty_response(self, mock_client_cls, tmp_path):
         mock_client = AsyncMock()
         mock_client.fetch_ohlcv.return_value = []
@@ -151,19 +151,21 @@ class TestRestResources:
         source = build_rest_source(
             symbols=["BTCUSDT"], data_type="aggTrades", trade_type=TradeType.spot
         )
-        assert "rest_BTCUSDT_aggTrades" in source.selected_resources
+        assert "BTCUSDT_aggTrades" in source.selected_resources
 
     def test_build_rest_source_funding_rate(self):
         source = build_rest_source(
             symbols=["BTCUSDT"], data_type="fundingRate", trade_type=TradeType.um
         )
-        assert "rest_BTCUSDT_fundingRate" in source.selected_resources
+        assert "BTCUSDT_fundingRate" in source.selected_resources
 
-    @patch("binance_datatool.dlt_sources.binance_rest.BinanceSpotRestClient")
+    @patch("binance_datatool.exchange.binance_rest.BinanceSpotRestClient")
     def test_agg_trades_via_pipeline(self, mock_client_cls, tmp_path):
+        from types import SimpleNamespace
+
         mock_client = AsyncMock()
         mock_client.fetch_agg_trades.return_value = [
-            {"a": 1, "p": "50000.0", "q": "0.5", "T": 1700000000000, "m": False}
+            SimpleNamespace(a=1, p="50000.0", q="0.5", f="", l="", T=1700000000000, m=False)
         ]
         mock_client_cls.return_value = mock_client
 
@@ -173,7 +175,7 @@ class TestRestResources:
             "test_agg", catalog_path=db, dataset_name="bronze", destination="duckdb"
         )
         with patch(
-            "binance_datatool.dlt_sources.binance_rest.BinanceSpotRestClient",
+            "binance_datatool.exchange.binance_rest.BinanceSpotRestClient",
             return_value=mock_client,
         ):
             pipeline.run(source)
@@ -251,7 +253,7 @@ class TestPipeline:
                 "60300.0",
             )
         ]
-        with patch("binance_datatool.dlt_sources.binance.BinanceSpotRestClient") as mc:
+        with patch("binance_datatool.exchange.binance_rest.BinanceSpotRestClient") as mc:
             mc.return_value = client
             source = build_binance_source(
                 symbols=["BTCUSDT"], interval="1h", trade_type=TradeType.spot
@@ -275,6 +277,7 @@ class TestPipeline:
 
     def test_all_trade_type_data_type_combos_um_funding(self, tmp_path):
         """Verify um-fundingRate produces correct tables."""
+        from types import SimpleNamespace
         from unittest.mock import AsyncMock, patch
 
         from binance_datatool.common.enums import TradeType
@@ -283,7 +286,9 @@ class TestPipeline:
         db = str(tmp_path / "um_funding.duckdb")
         client = AsyncMock()
         client.fetch_funding_rate.return_value = [
-            {"fundingTime": 1700000000000, "fundingRate": "0.0001"}
+            SimpleNamespace(
+                symbol="BTCUSDT", funding_time=1700000000000, funding_rate="0.0001", mark_price=""
+            )
         ]
         with patch("binance_datatool.exchange.binance_rest.BinanceUmRestClient") as mc:
             mc.return_value = client

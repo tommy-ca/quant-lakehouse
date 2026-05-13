@@ -178,7 +178,7 @@ class MetadataWorkflow:
             return
         db_path = Path(str(self._duckdb_path))
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        from binance_datatool.workflow.legacy.catalog import DuckLakeCatalog
+        from binance_datatool.storage.catalog import DuckLakeCatalog
 
         catalog = DuckLakeCatalog(lake_path=self._catalog_path, db_path=db_path)
         con = catalog.connect()

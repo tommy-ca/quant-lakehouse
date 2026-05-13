@@ -11,13 +11,23 @@ MODEL (
   ),
 );
 
--- Silver klines: Bronze → Silver transform.
--- Renames columns to DBN conventions, adds metadata, casts types.
--- ts_event is in microseconds (DBN convention). open_time from Binance
--- API is in milliseconds, so multiply by 1000.
--- ts_date is computed from ms → days since epoch.
+-- Silver klines: Bronze → Silver transform (SQLMesh path).
+--
+-- NOTE: This is a MINIMAL demonstration model. The primary pipeline uses Polars
+-- transforms (bronze_klines_to_silver in transforms/klines.py). This SQLMesh
+-- model has several limitations compared to the Polars path:
+--
+--   1. Hardcoded metadata: exchange='binance-spot', trade_type='spot',
+--      source='dlt_api' — does not handle um/cm trade types or archive source.
+--   2. No μs auto-detection: assumes open_time is in milliseconds (ms).
+--      Archive data with μs timestamps (16-digit) produces incorrect ts_date.
+--   3. ts_recv/ingested_at: computed at query time, not at ingestion time.
+--   4. Only spot klines: no aggTrades or fundingRate models exist.
+--
+-- For production use, prefer the Polars transform pipeline which handles all
+-- trade types, source types, and μs auto-detection.
 SELECT
-  CAST(open_time AS BIGINT) * 1000 AS ts_event,
+  CAST(CAST(open_time AS BIGINT) AS BIGINT) * 1000 AS ts_event,
   CAST(EPOCH_ms(CURRENT_TIMESTAMP) * 1000 AS BIGINT) AS ts_recv,
   CAST(open AS DOUBLE) AS open,
   CAST(high AS DOUBLE) AS high,
@@ -35,6 +45,6 @@ SELECT
   interval,
   'klines' AS data_type,
   CAST(EPOCH_ms(CURRENT_TIMESTAMP) * 1000 AS BIGINT) AS ingested_at,
-  CAST(CAST(open_time / 86400000 AS BIGINT) AS DATE) AS ts_date
+  CAST(CAST(CAST(open_time AS BIGINT) / 86400000 AS BIGINT) AS DATE) AS ts_date
 FROM bronze.klines
 WHERE CAST(open_time AS BIGINT) BETWEEN @start_ds AND @end_ds

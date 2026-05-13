@@ -102,6 +102,7 @@ Follows DBN (`ts_event`, `ts_recv`) and tardis.dev (price/size volume) conventio
 | `interval` | Auto | UTF8 | e.g. `"1h"` |
 | `data_type` | Auto | UTF8 | `"klines"` |
 | `ingested_at` | Auto | INT64 μs | Ingestion timestamp |
+| `ts_date` | Auto | DATE | Partition date from ts_event |
 
 ### Trades (unified raw/aggregated)
 
@@ -114,15 +115,19 @@ Unifies trades, aggTrades from all trade types.
 | `price` | FLOAT64 | tardis.dev | Trade price |
 | `size` | FLOAT64 | tardis.dev | Trade size |
 | `side` | UTF8 | tardis.dev | `"buy"`, `"sell"`, or null |
-| `trade_id` | INT64 | Binance | Unique trade ID |
-| `rtype` | UTF8 | Auto | Record type: `"trade"` or `"agg"` |
-| `agg_trade_id` | INT64 | Binance | Aggregated trade ID |
+| `trade_id` | INT64 | Binance | Unique trade ID (maps to agg_trade_id for aggTrades) |
 | `is_buyer_maker` | INT8 | Binance | 1 if buyer is maker |
+| `agg_trade_id` | INT64 | Binance | Aggregated trade ID |
+| `first_trade_id` | INT64 | Binance | First constituent trade ID |
+| `last_trade_id` | INT64 | Binance | Last constituent trade ID |
+| `rtype` | UTF8 | Auto | Record type: `"trade"` or `"agg"` |
 | `source` | UTF8 | Meta | Data source |
+| `exchange` | UTF8 | Meta | DuckLake catalog path |
 | `trade_type` | UTF8 | Meta | `"spot"`, `"um"`, `"cm"` |
 | `symbol` | UTF8 | Meta | Trading pair |
 | `data_type` | UTF8 | Meta | `"trades"` or `"aggTrades"` |
 | `ingested_at` | INT64 μs | Meta | Ingestion timestamp |
+| `ts_date` | DATE | Meta | Partition date from ts_event |
 
 ### Funding Rate
 
@@ -134,11 +139,14 @@ Perpetual futures funding rates (um/cm only).
 | `ts_recv` | INT64 μs | DBN | Receive timestamp |
 | `funding_rate` | FLOAT64 | tardis.dev | Rate (0.0001 = 0.01%) |
 | `mark_price` | FLOAT64 | Binance | Mark price |
+| `funding_timestamp` | INT64 μs | Binance | Funding event timestamp |
 | `source` | UTF8 | Meta | Data source |
+| `exchange` | UTF8 | Meta | DuckLake catalog path |
 | `trade_type` | UTF8 | Meta | `"um"`, `"cm"` |
 | `symbol` | UTF8 | Meta | Trading pair |
 | `data_type` | UTF8 | Meta | `"fundingRate"` |
 | `ingested_at` | INT64 μs | Meta | Ingestion timestamp |
+| `ts_date` | DATE | Meta | Partition date from ts_event |
 
 ## Bronze → Silver Mapping
 
@@ -262,8 +270,8 @@ No data is copied into DuckDB — views scan the lake directly.
 | Table | Columns | Partition | Description |
 |-------|---------|-----------|-------------|
 | `klines` | 19 | `trade_type, symbol, interval, ts_date` | Unified OHLCV across spot/um/cm |
-| `aggTrades` | 16 | `trade_type, symbol, ts_date` | Unified aggregated trades |
-| `fundingRate` | 12 | `trade_type, symbol, ts_date` | Unified funding rates (um/cm) |
+| `aggTrades` | 18 | `trade_type, symbol, ts_date` | Unified aggregated trades (includes first_trade_id, last_trade_id) |
+| `fundingRate` | 12 | `trade_type, symbol, ts_date` | Unified funding rates (um/cm, includes mark_price) |
 | `venues` | 7 | none | Venue metadata |
 | `symbols` | 11 | `trade_type` | Symbol metadata |
 

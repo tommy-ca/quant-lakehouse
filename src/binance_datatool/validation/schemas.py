@@ -95,7 +95,7 @@ class AggTradesSilverSchema(pa.DataFrameModel):
     symbol: str = pa.Field(nullable=False)
     data_type: str = pa.Field(nullable=False)
     ingested_at: int = pa.Field(ge=0, nullable=False)
-    ts_date: object = pa.Field(nullable=False)
+    ts_date: pl.Date = pa.Field(nullable=False)
 
 
 class FundingRateSilverSchema(pa.DataFrameModel):
@@ -116,7 +116,37 @@ class FundingRateSilverSchema(pa.DataFrameModel):
     symbol: str = pa.Field(nullable=False)
     data_type: str = pa.Field(nullable=False)
     ingested_at: int = pa.Field(ge=0, nullable=False)
-    ts_date: object = pa.Field(nullable=False)
+    ts_date: pl.Date = pa.Field(nullable=False)
+
+
+class BronzeAggTradesSchema(pa.DataFrameModel):
+    """Schema for bronze aggTrades (dlt REST output, raw VARCHAR)."""
+
+    class Config:
+        coerce = True
+        strict = True
+
+    agg_trade_id: str = pa.Field(nullable=False)
+    price: str = pa.Field(nullable=False)
+    quantity: str = pa.Field(nullable=False)
+    first_trade_id: str = pa.Field(nullable=True)
+    last_trade_id: str = pa.Field(nullable=True)
+    transact_time: str = pa.Field(nullable=False)
+    is_buyer_maker: str = pa.Field(nullable=False)
+    symbol: str = pa.Field(nullable=False)
+
+
+class BronzeFundingRateSchema(pa.DataFrameModel):
+    """Schema for bronze fundingRate (dlt REST output, raw VARCHAR)."""
+
+    class Config:
+        coerce = True
+        strict = True
+
+    symbol: str = pa.Field(nullable=False)
+    funding_time: str = pa.Field(nullable=False)
+    funding_rate: str = pa.Field(nullable=False)
+    mark_price: str = pa.Field(nullable=True)
 
 
 class VenuesSchema(pa.DataFrameModel):
@@ -186,4 +216,20 @@ def validate_silver_klines(df: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
         result = result.collect()
     check_high_gte_low(result, "high", "low")
     check_high_gte_low(result, "close", "low")
+    return result
+
+
+def validate_bronze_agg_trades(df: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
+    """Validate bronze aggTrades with Pandera."""
+    result = BronzeAggTradesSchema.validate(df, lazy=True)
+    if isinstance(result, pl.LazyFrame):
+        result = result.collect()
+    return result
+
+
+def validate_bronze_funding_rate(df: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
+    """Validate bronze fundingRate with Pandera."""
+    result = BronzeFundingRateSchema.validate(df, lazy=True)
+    if isinstance(result, pl.LazyFrame):
+        result = result.collect()
     return result

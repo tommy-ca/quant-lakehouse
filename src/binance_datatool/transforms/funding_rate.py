@@ -7,10 +7,7 @@ from typing import Literal
 
 import polars as pl
 
-
-def _exchange_for(trade_type: str) -> str:
-    mapping = {"um": "binance-perps-um", "cm": "binance-perps-cm"}
-    return mapping.get(trade_type, "binance-perps-um")
+from binance_datatool.common.enums import exchange_for
 
 
 def bronze_funding_rate_to_silver(
@@ -35,14 +32,18 @@ def bronze_funding_rate_to_silver(
         Silver-normalized DataFrame matching the DuckLake fundingRate schema.
     """
     now_us = int(datetime.now(UTC).timestamp() * 1_000_000)
-    exchange = _exchange_for(trade_type)
+    exchange = exchange_for(trade_type)
 
     return df.with_columns(
         [
             pl.col("funding_time").cast(pl.Int64).alias("ts_event"),
             pl.lit(now_us, dtype=pl.Int64).alias("ts_recv"),
             pl.col("funding_rate").cast(pl.Float64),
-            pl.col("mark_price").cast(pl.Float64),
+            pl.col("mark_price")
+            .cast(pl.Utf8)
+            .str.replace(r"^\s*$", "0")
+            .cast(pl.Float64)
+            .alias("mark_price"),
             pl.col("funding_time").cast(pl.Int64).alias("funding_timestamp"),
             pl.lit(source, dtype=pl.Utf8).alias("source"),
             pl.lit(exchange, dtype=pl.Utf8).alias("exchange"),
