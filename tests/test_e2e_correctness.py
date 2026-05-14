@@ -23,10 +23,9 @@ import duckdb
 import pytest
 
 from binance_datatool.common.enums import DataFrequency, DataType, TradeType, exchange_for
-from binance_datatool.dlt_sources.binance import build_binance_source
-from binance_datatool.dlt_sources.binance_archive import archive_data_resource
-from binance_datatool.dlt_sources.binance_rest import build_rest_source
-from binance_datatool.dlt_sources.pipeline import run_source
+from binance_datatool.dlt.destinations import run_source
+from binance_datatool.dlt.resources.binance_archive import archive_data_resource
+from binance_datatool.dlt.sources import build_binance_source, build_rest_source
 from binance_datatool.storage.duckdb import get_connection, write_silver_table
 from binance_datatool.transforms.agg_trades import bronze_agg_trades_to_silver
 from binance_datatool.transforms.funding_rate import bronze_funding_rate_to_silver

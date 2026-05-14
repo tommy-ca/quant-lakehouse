@@ -6,15 +6,13 @@ from unittest.mock import AsyncMock, patch
 
 from binance_datatool.common.enums import TradeType
 from binance_datatool.common.types import KlineData
-from binance_datatool.dlt_sources.binance import build_binance_source, klines_resource
-from binance_datatool.dlt_sources.binance_archive import archive_data_resource
-from binance_datatool.dlt_sources.binance_rest import (
-    agg_trades_resource,
-    build_rest_source,
-    funding_rate_resource,
-)
-from binance_datatool.dlt_sources.binance_ws import build_ws_source, ws_klines_resource
-from binance_datatool.dlt_sources.pipeline import build_pipeline
+from binance_datatool.dlt.destinations import build_pipeline
+from binance_datatool.dlt.resources.binance_agg_trades import agg_trades_resource
+from binance_datatool.dlt.resources.binance_archive import archive_data_resource
+from binance_datatool.dlt.resources.binance_funding import funding_rate_resource
+from binance_datatool.dlt.resources.binance_klines import klines_resource
+from binance_datatool.dlt.resources.binance_ws import ws_klines_resource
+from binance_datatool.dlt.sources import build_binance_source, build_rest_source, build_ws_source
 
 # ── REST Klines ──────────────────────────────────────────────────
 
@@ -103,7 +101,7 @@ class TestKlinesResource:
             "test_empty", catalog_path=db, dataset_name="bronze", destination="duckdb"
         )
         with patch(
-            "binance_datatool.dlt_sources.binance.BinanceSpotRestClient", return_value=mock_client
+            "binance_datatool.exchange.binance_rest.BinanceSpotRestClient", return_value=mock_client
         ):
             pipeline.run(source)
         assert True
@@ -234,7 +232,7 @@ class TestPipeline:
 
         from binance_datatool.common.enums import TradeType
         from binance_datatool.common.types import KlineData
-        from binance_datatool.dlt_sources.binance import build_binance_source
+        from binance_datatool.dlt.sources import build_binance_source
 
         db = str(tmp_path / "spot_klines.duckdb")
         client = AsyncMock()
@@ -281,7 +279,7 @@ class TestPipeline:
         from unittest.mock import AsyncMock, patch
 
         from binance_datatool.common.enums import TradeType
-        from binance_datatool.dlt_sources.binance_rest import build_rest_source
+        from binance_datatool.dlt.sources import build_rest_source
 
         db = str(tmp_path / "um_funding.duckdb")
         client = AsyncMock()
