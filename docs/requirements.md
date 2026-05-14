@@ -987,9 +987,40 @@ fix stale import paths, and finalize the standalone dlt package.
 
 **Final Baseline**: 271 tests, 8/8 E2E, lint/format clean, docs 100% accurate
 
+### Phase 36: Code Quality & Data Integrity Fixes (2026-05-14)
+
+**Goal**: Comprehensive SOLID/KISS/DRY/YAGNI audit. Fix critical data integrity bug,
+remove dead code, and tighten error handling.
+
+**Critical Fix**:
+- ✅ `transform.py`: Added `WHERE symbol = ?` filter to `transform_agg_trades()` and
+  `transform_funding_rate()` — bugs that would corrupt silver data for all symbols
+  when multiple symbols existed in bronze. Previously selected ALL rows and wrote
+  them as single-symbol silver.
+
+**Code Quality (SOLID/KISS/DRY/YAGNI)**:
+- ✅ `common/enums.py`: `exchange_for()` now raises `ValueError` on unknown trade type
+  instead of silently defaulting to `"binance-spot"`
+- ✅ `dlt/resources/archive_index.py`: Removed unused `archive_home` parameter from
+  `_parse_path()` (YAGNI — passed but never used)
+- ✅ `workflow/prefect_tasks/extract.py`: Removed dead `_DEFAULT_ARCHIVE_HOME` variable
+  (zero readers); replaced redundant `build_rest_source()` local imports with
+  module-level `build_binance_source()`
+
+**Zombie Directory Cleanup**:
+- ✅ Deleted `src/bhds/`, `src/streaming_lakehouse/`, `src/bdt_common/` — complete
+  codebase skeletons from previous projects with zero .py source files
+- ✅ Deleted remaining `adapter/` directory (only stale .pyc files remained)
+
+**Docs Fixes**:
+- ✅ AGENTS.md: Fixed 3 stale line references (klines.sql:29 → filename only;
+  binance_archive.py:196 → filename only; binance_archive.py:72 → archive/client.py)
+
+**Final Baseline**: 271 tests, 8/8 E2E, lint/format clean
+
 ---
 
-**Document Version**: 1.5
+**Document Version**: 1.6
 **Last Updated**: 2026-05-14
 **Maintainer**: Team
-**Status**: Clean. YAGNI removed → docs fully aligned with codebase.
+**Status**: Stable. Critical bug fixed → code quality tightened → zombie dirs removed.
