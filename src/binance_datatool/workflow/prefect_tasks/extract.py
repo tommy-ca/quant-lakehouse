@@ -14,8 +14,8 @@ from binance_datatool.archive.client import ArchiveClient
 from binance_datatool.common.enums import DataFrequency, DataType, TradeType
 from binance_datatool.dlt.destinations import run_source as _run_dlt
 from binance_datatool.dlt.resources.binance_archive import archive_data_resource
+from binance_datatool.dlt.resources.binance_metadata import build_metadata_source
 from binance_datatool.dlt.sources import build_binance_source
-from binance_datatool.dlt_sources.binance_metadata import build_metadata_source
 from binance_datatool.workflow.archive_cache import ArchiveFileCache
 from binance_datatool.workflow.gap_detection import detect_bronze_gaps as _detect_gaps
 

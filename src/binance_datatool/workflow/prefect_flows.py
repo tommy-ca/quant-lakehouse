@@ -513,7 +513,7 @@ def refresh_metadata_flow(
         # dlt metadata source (preferred)
         from binance_datatool.common.enums import TradeType
         from binance_datatool.dlt.destinations import run_source
-        from binance_datatool.dlt_sources.binance_metadata import build_metadata_source
+        from binance_datatool.dlt.resources.binance_metadata import build_metadata_source
 
         source = build_metadata_source(trade_types=[TradeType(trade_type)])
         run_source(source, source_name="metadata_refresh", catalog_path=db_path)
@@ -1028,8 +1028,8 @@ def refresh_archive_index(
     catalog_path: str | None = None,
 ) -> dict:
     """Scan local archive mirror and update bronze.archive_files table."""
-    from binance_datatool.dlt_sources.bronze_archive_index import build_archive_index_source
-    from binance_datatool.dlt_sources.pipeline import run_source
+    from binance_datatool.dlt.destinations import run_source
+    from binance_datatool.dlt.resources.archive_index import build_archive_index_source
 
     source = build_archive_index_source(archive_home=archive_home)
     return run_source(

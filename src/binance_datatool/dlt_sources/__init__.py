@@ -1,27 +1,25 @@
-"""dlt sources for binance-datatool.
+"""dlt sources for binance-datatool — backward-compat re-exports.
 
-Each module wraps an exchange/SDK client as ``@dlt.resource`` generators:
-
-- ``binance`` — REST API klines (gap-fill)
-- ``binance_archive`` — S3 archive CSV ZIPs (historical batch) — all data types
-- ``binance_rest`` — REST API aggTrades/fundingRate (gap-fill)
-- ``binance_ws`` — WebSocket streaming klines (real-time)
-- ``binance_metadata`` — Symbol/venue metadata from archive + API
+All canonical sources now live in ``binance_datatool.dlt``.
+Import from there for new code.
 """
 
-from binance_datatool.dlt_sources.binance import build_binance_source, klines_resource
-from binance_datatool.dlt_sources.binance_archive import archive_data_resource
-from binance_datatool.dlt_sources.binance_metadata import build_metadata_source, symbols_resource
-from binance_datatool.dlt_sources.binance_rest import (
-    agg_trades_resource,
-    build_rest_source,
-    funding_rate_resource,
-)
-from binance_datatool.dlt_sources.binance_ws import build_ws_source, ws_klines_resource
-from binance_datatool.dlt_sources.bronze_archive_index import (
+from binance_datatool.dlt.destinations import build_pipeline, run_source
+from binance_datatool.dlt.resources.archive_index import (
     archive_files_resource,
     build_archive_index_source,
 )
+from binance_datatool.dlt.resources.binance_agg_trades import agg_trades_resource
+from binance_datatool.dlt.resources.binance_archive import archive_data_resource
+from binance_datatool.dlt.resources.binance_funding import funding_rate_resource
+from binance_datatool.dlt.resources.binance_klines import klines_resource
+from binance_datatool.dlt.resources.binance_metadata import (
+    build_metadata_source,
+    symbols_resource,
+    venues_resource,
+)
+from binance_datatool.dlt.resources.binance_ws import ws_klines_resource
+from binance_datatool.dlt.sources import build_binance_source, build_rest_source, build_ws_source
 
 __all__ = [
     "klines_resource",
@@ -33,7 +31,10 @@ __all__ = [
     "ws_klines_resource",
     "build_ws_source",
     "symbols_resource",
+    "venues_resource",
     "build_metadata_source",
     "archive_files_resource",
     "build_archive_index_source",
+    "build_pipeline",
+    "run_source",
 ]
