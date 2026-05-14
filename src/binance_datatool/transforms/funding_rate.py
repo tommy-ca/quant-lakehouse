@@ -8,6 +8,7 @@ from typing import Literal
 import polars as pl
 
 from binance_datatool.common.enums import exchange_for
+from binance_datatool.validation.schemas import validate_silver_funding_rate
 
 
 def bronze_funding_rate_to_silver(
@@ -16,6 +17,7 @@ def bronze_funding_rate_to_silver(
     symbol: str = "",
     trade_type: Literal["um", "cm"] = "um",
     source: Literal["dlt_api", "archive"] = "dlt_api",
+    validate: bool = True,
 ) -> pl.DataFrame:
     """Transform bronze fundingRate DataFrame to Silver schema.
 
@@ -34,7 +36,7 @@ def bronze_funding_rate_to_silver(
     now_us = int(datetime.now(UTC).timestamp() * 1_000_000)
     exchange = exchange_for(trade_type)
 
-    return df.with_columns(
+    result = df.with_columns(
         [
             pl.col("funding_time").cast(pl.Int64).alias("ts_event"),
             pl.lit(now_us, dtype=pl.Int64).alias("ts_recv"),
@@ -72,3 +74,8 @@ def bronze_funding_rate_to_silver(
             "ts_date",
         ]
     )
+
+    if validate:
+        validate_silver_funding_rate(result)
+
+    return result

@@ -227,9 +227,17 @@ def validate_bronze_agg_trades(df: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
     return result
 
 
-def validate_bronze_funding_rate(df: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
-    """Validate bronze fundingRate with Pandera."""
-    result = BronzeFundingRateSchema.validate(df, lazy=True)
+def validate_silver_agg_trades(df: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
+    """Validate silver aggTrades with Pandera."""
+    result = AggTradesSilverSchema.validate(df, lazy=True)
+    if isinstance(result, pl.LazyFrame):
+        result = result.collect()
+    return result
+
+
+def validate_silver_funding_rate(df: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
+    """Validate silver fundingRate with Pandera."""
+    result = FundingRateSilverSchema.validate(df, lazy=True)
     if isinstance(result, pl.LazyFrame):
         result = result.collect()
     return result

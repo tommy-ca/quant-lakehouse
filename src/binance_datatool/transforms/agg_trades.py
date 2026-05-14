@@ -8,6 +8,7 @@ from typing import Literal
 import polars as pl
 
 from binance_datatool.common.enums import exchange_for
+from binance_datatool.validation.schemas import validate_silver_agg_trades
 
 
 def bronze_agg_trades_to_silver(
@@ -16,6 +17,7 @@ def bronze_agg_trades_to_silver(
     symbol: str = "",
     trade_type: Literal["spot", "um", "cm"] = "spot",
     source: Literal["dlt_api", "archive", "ws_stream"] = "dlt_api",
+    validate: bool = True,
 ) -> pl.DataFrame:
     """Transform bronze aggTrades DataFrame to Silver schema.
 
@@ -37,7 +39,7 @@ def bronze_agg_trades_to_silver(
     now_us = int(datetime.now(UTC).timestamp() * 1_000_000)
     exchange = exchange_for(trade_type)
 
-    return df.with_columns(
+    result = df.with_columns(
         [
             pl.col("transact_time").cast(pl.Int64).alias("ts_event"),
             pl.lit(now_us, dtype=pl.Int64).alias("ts_recv"),
@@ -97,3 +99,8 @@ def bronze_agg_trades_to_silver(
             "ts_date",
         ]
     )
+
+    if validate:
+        validate_silver_agg_trades(result)
+
+    return result

@@ -124,6 +124,7 @@ class SymbolMetaModel(BaseModel):
     dlt_config: ClassVar[DltConfig] = {"is_authoritative_model": True}
 
     symbol: str
+    trade_type: str
     data_type: str
     base_asset: str | None = None
     quote_asset: str | None = None

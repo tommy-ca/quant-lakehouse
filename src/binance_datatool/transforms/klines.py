@@ -34,8 +34,8 @@ def bronze_klines_to_silver(
         interval: Kline interval.
         trade_type: ``"spot"``, ``"um"``, ``"cm"``.
         source: Source label.
-        validate: When True (default), validates input against
-            ``BronzeKlinesSchema`` and output against ``SilverKlinesSchema``.
+        validate: When True (default), validates the output DataFrame
+            against ``SilverKlinesSchema``.
 
     Returns:
         Silver-normalized DataFrame with columns matching the DuckLake silver
