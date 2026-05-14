@@ -969,9 +969,27 @@ fix stale import paths, and finalize the standalone dlt package.
 - ✅ `dlt_sources/` now 100% forwarding-only — zero real logic; canonical source is `dlt/`
 - ✅ 308 unit tests passing, 8/8 E2E passing
 
+### Phase 35: YAGNI Cleanup & Docs Consistency (2026-05-14)
+
+**Goal**: Remove dead code and ensure 100% documentation accuracy against current codebase.
+
+**Removals (YAGNI)**:
+- ✅ Removed `adapter/` package (4 files, 444 lines) — zero production consumers; aspirational multi-source pattern never wired in
+- ✅ Removed `source_registry.py` (21 lines) — only used by adapter
+- ✅ Removed `tests/test_adapter_binance.py` (406 lines) and `tests/test_source_registry.py` — dead test files
+- ✅ Removed `validation/models.py` (16-line forwarding stub) — zero callers; all consumers use `dlt.models` directly
+
+**Docs Updates**:
+- ✅ `architecture.md`: removed adapter/ and source_registry.py from package tree; removed validation/models.py; updated validation layer description
+- ✅ AGENTS.md: fixed 3 stale Known Issue file paths (pipeline.py→dlt/destinations, gap_detection.py→workflow/, binance_archive.py→dlt/resources/)
+- ✅ `workflow-mapping.md`: updated stale dlt_sources/ paths → dlt/resources/; updated test count (325→271) and layer counts
+- ✅ `docs/reference/README.md`: added sections for dlt, transforms, validation, storage, workflow.prefect_tasks, and CLI commands
+
+**Final Baseline**: 271 tests, 8/8 E2E, lint/format clean, docs 100% accurate
+
 ---
 
-**Document Version**: 1.4
+**Document Version**: 1.5
 **Last Updated**: 2026-05-14
 **Maintainer**: Team
-**Status**: Current. dlt_sources fully migrated → standalone dlt package complete.
+**Status**: Clean. YAGNI removed → docs fully aligned with codebase.

@@ -10,7 +10,6 @@ src/binance_datatool/
 ├── __init__.py              # Version metadata only
 ├── common/                  # Shared utilities (enums, constants, types, filters, symbols, progress, intervals, logging, path, settings)
 ├── archive/                 # Archive access (S3 HTTP client, checksum, downloader, symbol directory)
-├── adapter/                 # Multi-source adapter pattern (DataSourceAdapter protocol, Binance adapter, bridge, registry)
 ├── exchange/                # Live exchange API clients (REST/WebSocket, CCXT integration)
 │   ├── client.py            # ExchangeClient protocol (@runtime_checkable)
 │   ├── binance_rest.py      # BinanceSpot/Um/CmRestClient
@@ -42,8 +41,7 @@ src/binance_datatool/
 │   ├── agg_trades.py        # bronze_agg_trades_to_silver() + side derivation + Pandera validation
 │   └── funding_rate.py      # bronze_funding_rate_to_silver() + empty mark_price handling
 ├── validation/              # Pandera schemas + validation helpers
-│   ├── schemas.py           # 6 Pandera schemas (bronze/silver for klines/aggTrades/fundingRate) + venue/symbol
-│   └── models.py            # Forwarding → dlt.models (backward compat re-exports)
+│   └── schemas.py           # 6 Pandera schemas (bronze/silver for klines/aggTrades/fundingRate) + venue/symbol
 ├── storage/                 # DuckDB/DuckLake storage layer
 │   ├── duckdb.py            # get_connection(), write_silver_table()
 │   └── catalog.py           # DuckLakeCatalog with TABLE_DEFS for silver tables
@@ -73,7 +71,6 @@ src/binance_datatool/
 ├── cli/                     # Typer CLI layer
 │   ├── __init__.py          # Root callback with -v/-vv verbosity and --archive-home
 │   └── archive.py           # All CLI commands (list-symbols, list-files, download, verify, gap-fill, health, sink, refresh-metadata)
-└── source_registry.py       # SourceRegistry (source selection by name)
 ```
 
 ## Layered Design
@@ -98,7 +95,7 @@ CLI  (cli/)
 | **Workflow** | `binance_datatool.workflow` | Business logic orchestration; Prefect flows and tasks; gap detection, health checks, metadata. |
 | **dlt** | `binance_datatool.dlt` | Resources, source builders, Pydantic models, destination helpers. Standalone package. |
 | **Transforms** | `binance_datatool.transforms` | Polars-based Bronze→Silver transforms with Pandera validation. |
-| **Validation** | `binance_datatool.validation` | Pandera DataFrame schemas and Pydantic per-record models. |
+| **Validation** | `binance_datatool.validation` | Pandera DataFrame schemas for pipeline boundary validation. |
 | **Storage** | `binance_datatool.storage` | DuckDB/DuckLake read/write, catalog definitions. |
 | **Archive Client** | `binance_datatool.archive` | S3 HTTP communication with data.binance.vision. |
 | **Exchange** | `binance_datatool.exchange` | Live REST/WebSocket API clients via official Binance SDKs. |
