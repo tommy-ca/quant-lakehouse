@@ -33,6 +33,8 @@ Our Silver layer schema is shown with its source convention for each field.
 | `interval` VARCHAR | file name | `interval` | — | `rtype` (OHLCV_1H etc.) |
 | `data_type` VARCHAR | file path | — | — | `schema` |
 | `ingested_at` INT64 μs | — | — | — | — |
+| `source` VARCHAR | — | — | — | `schema` |
+| `ts_date` DATE | derived | derived | — | `ts_event` date part |
 
 
 **Timestamp comparison**: `1778256000000` (ms) = `1778256000000000` (μs tardis.dev) = `1778256000000000000` (ns DBN)
@@ -53,11 +55,16 @@ Our Silver layer schema is shown with its source convention for each field.
 | `trade_id` INT64 | `agg_trade_id` | `a` / `A` | `id` | `sequence` u32 |
 | `is_buyer_maker` INT64 | `is_buyer_maker` | `m` | — | `side` (encoded) |
 | `agg_trade_id` INT64 | `agg_trade_id` | `a` | — | — |
+| `first_trade_id` INT64 | `first_trade_id` | `f` | — | — |
+| `last_trade_id` INT64 | `last_trade_id` | `l` | — | — |
 | `rtype` VARCHAR | — | — | — | `rtype` u8 (MBP_0) |
 | `exchange` VARCHAR | — | — | `exchange` | `publisher_id` u16 |
+| `trade_type` VARCHAR | file path | — | — | `publisher_id` (encoded) |
 | `symbol` VARCHAR | file name | `s` | `symbol` | `instrument_id` u32 |
 | `data_type` VARCHAR | file path | — | — | `schema` (Trades) |
 | `ingested_at` INT64 μs | — | — | — | — |
+| `source` VARCHAR | — | — | — | `schema` |
+| `ts_date` DATE | derived | derived | — | `ts_event` date part |
 
 **tardis.dev `amount`**: Our `size` maps to tardis.dev `amount`. DBN also uses `size`. Binance uses `quantity`.
 
@@ -82,6 +89,8 @@ Our Silver layer schema is shown with its source convention for each field.
 | `trade_type` VARCHAR | file path | — | — | — |
 | `data_type` VARCHAR | file path | — | — | — |
 | `ingested_at` INT64 μs | — | — | — | — |
+| `source` VARCHAR | — | — | — | — |
+| `ts_date` DATE | derived | derived | — | — |
 
 **tardis.dev has additional fields** we could add:
 - `predicted_funding_rate`: next-next funding rate estimate
@@ -128,7 +137,7 @@ Our Silver layer schema is shown with its source convention for each field.
 
 | Concept | binance-datatool | Binance Archive | Binance REST | tardis.dev | DBN |
 |---|---|---|---|---|---|
-| Timestamps | `INT64` ms | `INT64` ms | `INT64` ms | `INT64` μs | `u64` ns |
+| Timestamps | `INT64` μs | `INT64` ms | `INT64` ms | `INT64` μs | `u64` ns |
 | Prices | `FLOAT64` | `str` (decimal) | `str` (decimal) | `FLOAT64` | `i64` 1e-9 |
 | Volumes | `FLOAT64` | `str` (decimal) | `str` (decimal) | `INT64` | `u32` |
 | Counts | `INT64` | `INT64` | `INT64` | `INT64` | `u32` |

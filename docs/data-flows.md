@@ -1,5 +1,9 @@
 # Data & Code Flows
 
+> **Note (2026-05-14):** The adapter-based flow diagrams in this document
+> reference the `adapter/` package and `SourceRegistry` which have been
+> removed (Phase 35). For current data flows, see `architecture.md` and `AGENTS.md`.
+
 This document provides detailed, step-by-step data and code flows for all major CLI commands and workflows. It includes ASCII sequence diagrams, state transitions, and integration points with the adapter layer.
 
 ---

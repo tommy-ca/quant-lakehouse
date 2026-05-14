@@ -1,5 +1,15 @@
 # Documentation Index & Project Status
 
+> **Note (2026-05-14):** This document describes the project as originally designed.
+> Several referenced modules have been removed (YAGNI cleanup — Phase 35):
+> `adapter/` (BinanceAdapter, SourceRegistry), `datacontract.py` (DataContract,
+> ContractRegistry), `source_registry.py`, `validation/models.py`.
+>
+> For the **current** architecture, see:
+> - `architecture.md` — current package tree and layer design
+> - `requirements.md` (§Phases 33-36) — recent changes and cleanup
+> - `AGENTS.md` — stack architecture table and working model
+
 ## Overview
 
 This index provides a complete picture of the binance-datatool project after comprehensive requirements, specification, and architecture review. It documents the current state, completed work, and clear path forward for implementation.

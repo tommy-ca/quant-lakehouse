@@ -1,5 +1,15 @@
 # Formal Requirements & Specification Document
 
+> **Note (2026-05-14):** This document's main body (§§1-6) describes an adapter-based
+> multi-source architecture that was **removed** (YAGNI cleanup — Phase 35, see §Phase 35).
+> The `adapter/` package, `datacontract.py`, and `source_registry.py` no longer exist.
+> The current architecture uses dlt resources, Polars transforms, and Pandera schemas.
+>
+> For the current architecture, see:
+> - `architecture.md` — current package tree
+> - `AGENTS.md` — stack architecture table
+> - This document's Phase sections (§Phases 14-36) — tracked changes
+
 ## 1. Project Overview
 
 **Project**: `binance-datatool` — A multi-source cryptocurrency market data ingestion toolkit

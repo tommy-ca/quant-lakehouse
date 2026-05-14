@@ -1,5 +1,13 @@
 # Implementation Guide
 
+> **Note (2026-05-14):** This guide was written for the original adapter-based
+> architecture. The `adapter/` package, `datacontract.py`, and `source_registry.py`
+> have been removed (YAGNI cleanup — Phase 35). Code examples referencing these
+> modules are historical.
+>
+> For current extension guidance, see `extending.md` which covers dlt resources,
+> Polars transforms, Pandera schemas, and Prefect tasks.
+
 This document guides developers through implementing the specifications and building out binance-datatool into a scalable, multi-source data pipeline framework.
 
 ---

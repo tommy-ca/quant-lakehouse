@@ -1,6 +1,11 @@
 # Formal Specification: Data Pipeline Framework for Multi-Source Crypto Market Data
 
 **Version**: 2.0 (Generalized & DataOps-Ready)
+
+> **Note (2026-05-14):** This specification describes an adapter-based
+> architecture (`DataSourceAdapter`, `SourceRegistry`) that was **removed**
+> (Phase 35). The current architecture uses dlt resources, Polars transforms,
+> and Pandera schemas. See `architecture.md` and `requirements.md` (§Phases 33-36).
 **Date**: 2026-05-07
 **Status**: Foundation Complete, Implementation Ready
 **Audience**: Architects, Implementers, DataOps Engineers, AI Agents
