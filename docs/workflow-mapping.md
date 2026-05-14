@@ -21,16 +21,16 @@ toolchain. dlt pipelines provide a complementary ingestion path.
 
 | Original Workflow | dlt Equivalent | Status | Notes |
 |---|---|---|---|
-| ``GapFillWorkflow`` (REST klines) | ``dlt_sources/binance.py`` ``klines_resource`` | ✅ Complete | REST API fetch with merge disposition. Original also does gap detection + CSV output |
+| ``GapFillWorkflow`` (REST klines) | ``dlt/resources/binance_klines.py`` ``klines_resource`` | ✅ Complete | REST API fetch with merge disposition. Original also does gap detection + CSV output |
 | ``SinkWorkflow`` (Bronze→Silver) | ``transforms/klines.py`` + Prefect ``transform_to_silver`` | ✅ Complete | Polars transform + Pandera validation + Arrow→DuckDB. Supports klines, aggTrades, fundingRate |
-| ``MetadataWorkflow`` (symbol discovery) | ``dlt_sources/binance_metadata.py`` | ✅ Complete | Wraps ArchiveListSymbolsWorkflow as dlt resource with replace disposition |
+| ``MetadataWorkflow`` (symbol discovery) | ``dlt/resources/binance_metadata.py`` | ✅ Complete | Wraps ArchiveListSymbolsWorkflow as dlt resource with replace disposition |
 | ``HealthCheckWorkflow`` (DuckLake anomalies) | ``workflow/health_check.py`` ``check_ducklake_anomalies`` | ⏹ Shared | Same function used by both ``historical_pipeline`` and ``dlt_sqlmesh_pipeline`` |
 
 ### Conceptually Different (same layer, different approach)
 
 | Original Workflow | dlt Equivalent | Why Different |
 |---|---|---|
-| ``ArchiveDownloadWorkflow`` | ``dlt_sources/binance_archive.py`` | Original: S3 listing + aria2c download. dlt: reads local ZIP files only. dlt assumes files are already on disk |
+| ``ArchiveDownloadWorkflow`` | ``dlt/resources/binance_archive.py`` | Original: S3 listing + aria2c download. dlt: reads local ZIP files only. dlt assumes files are already on disk |
 | ``GapFillWorkflow`` (detect gaps) | (no equivalent) | Gap detection logic (``_scan_existing_dates``, ``_detect_date_gaps``) has no dlt resource. dlt's merge-on-primary-key provides idempotent loading but no gap detection |
 | ``ArchiveVerifyWorkflow`` | (no equivalent) | SHA256 checksum verification is specific to the ZIP+CHECKSUM archive format. dlt relies on transport integrity (TLS for REST, filesystem for ZIPs) |
 
@@ -65,10 +65,10 @@ toolchain. dlt pipelines provide a complementary ingestion path.
 
 | Layer | Files | Tests |
 |---|---|---|
-| dlt sources (5 modules) | ``dlt_sources/`` (8 .py files) | 12 tests |
-| Polars transforms (3) | ``transforms/`` (4 .py files) | 10 tests |
-| Pandera schemas (4) | ``validation/`` (3 .py files) | 16 tests |
-| Pydantic models (3) | ``validation/models.py`` | 9 tests |
-| Prefect flows | ``workflow/prefect_flows.py`` (835 lines) | (tested via task-level coverage) |
+| dlt resources (7 modules) | ``dlt/resources/`` (8 .py files including _client.py) | 12 tests |
+| Polars transforms (3) | ``transforms/`` (4 .py files) | ~50 tests |
+| Pandera schemas (6) | ``validation/schemas.py`` | 16 tests |
+| Pydantic models (8) | ``dlt/models.py`` | 9 tests |
+| Prefect flows | ``workflow/prefect_flows.py`` (~1080 lines) | (tested via task-level coverage) |
 | SQLMesh models | ``models/`` (4 files) | (optional, requires sqlmesh install) |
-| **Total** | | **325 tests, 9 skipped** |
+| **Total** | | **271 tests, 15 skipped** |
