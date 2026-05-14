@@ -12,20 +12,7 @@ import dlt  # noqa: TC002 — our dlt package shadows the module name
 
 from binance_datatool.common.enums import TradeType
 from binance_datatool.dlt.models import RawFundingRateModel
-
-
-def _client_for(trade_type: TradeType):
-    if trade_type == TradeType.spot:
-        from binance_datatool.exchange.binance_rest import BinanceSpotRestClient
-
-        return BinanceSpotRestClient()
-    if trade_type == TradeType.um:
-        from binance_datatool.exchange.binance_rest import BinanceUmRestClient
-
-        return BinanceUmRestClient()
-    from binance_datatool.exchange.binance_rest import BinanceCmRestClient
-
-    return BinanceCmRestClient()
+from binance_datatool.dlt.resources._client import client_for
 
 
 @dlt.resource(
@@ -54,7 +41,7 @@ def funding_rate_resource(
     Returns:
         List of funding rate dicts (all values as strings).
     """
-    client = _client_for(trade_type)
+    client = client_for(trade_type)
     raw_data = asyncio.run(
         client.fetch_funding_rate(
             symbol=symbol,

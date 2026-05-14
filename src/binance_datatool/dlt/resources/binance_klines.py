@@ -12,23 +12,10 @@ import dlt  # noqa: TC002 — our dlt package shadows the module name
 
 from binance_datatool.common.enums import TradeType
 from binance_datatool.dlt.models import RawKlineModel
+from binance_datatool.dlt.resources._client import client_for
 
 if TYPE_CHECKING:
     from binance_datatool.common.types import KlineData
-
-
-def _client_for(trade_type: TradeType):
-    if trade_type == TradeType.spot:
-        from binance_datatool.exchange.binance_rest import BinanceSpotRestClient
-
-        return BinanceSpotRestClient()
-    if trade_type == TradeType.um:
-        from binance_datatool.exchange.binance_rest import BinanceUmRestClient
-
-        return BinanceUmRestClient()
-    from binance_datatool.exchange.binance_rest import BinanceCmRestClient
-
-    return BinanceCmRestClient()
 
 
 @dlt.resource(
@@ -59,7 +46,7 @@ def klines_resource(
     Returns:
         List of kline dicts with fields matching RawKlineModel schema.
     """
-    client = _client_for(trade_type)
+    client = client_for(trade_type)
     raw_data: list[KlineData] = asyncio.run(
         client.fetch_ohlcv(
             symbol=symbol,
