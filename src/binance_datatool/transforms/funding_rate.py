@@ -36,9 +36,15 @@ def bronze_funding_rate_to_silver(
     now_us = int(datetime.now(UTC).timestamp() * 1_000_000)
     exchange = exchange_for(trade_type)
 
+    funding_time_col = pl.col("funding_time").cast(pl.Int64)
+    is_us = funding_time_col >= 1_000_000_000_000_000
+
     result = df.with_columns(
         [
-            pl.col("funding_time").cast(pl.Int64).alias("ts_event"),
+            pl.when(is_us)
+            .then(funding_time_col)
+            .otherwise(funding_time_col * 1000)
+            .alias("ts_event"),
             pl.lit(now_us, dtype=pl.Int64).alias("ts_recv"),
             pl.col("funding_rate").cast(pl.Float64),
             pl.col("mark_price")
@@ -46,16 +52,19 @@ def bronze_funding_rate_to_silver(
             .str.replace(r"^\s*$", "0")
             .cast(pl.Float64)
             .alias("mark_price"),
-            pl.col("funding_time").cast(pl.Int64).alias("funding_timestamp"),
+            pl.when(is_us)
+            .then(funding_time_col)
+            .otherwise(funding_time_col * 1000)
+            .alias("funding_timestamp"),
             pl.lit(source, dtype=pl.Utf8).alias("source"),
             pl.lit(exchange, dtype=pl.Utf8).alias("exchange"),
             pl.lit(trade_type, dtype=pl.Utf8).alias("trade_type"),
             pl.lit(symbol, dtype=pl.Utf8).alias("symbol"),
             pl.lit("fundingRate", dtype=pl.Utf8).alias("data_type"),
             pl.lit(now_us, dtype=pl.Int64).alias("ingested_at"),
-            (pl.col("funding_time").cast(pl.Int64) // 86_400_000)
-            .cast(pl.Int32)
-            .cast(pl.Date)
+            pl.when(is_us)
+            .then((funding_time_col // 86_400_000_000).cast(pl.Int32).cast(pl.Date))
+            .otherwise((funding_time_col // 86_400_000).cast(pl.Int32).cast(pl.Date))
             .alias("ts_date"),
         ]
     ).select(

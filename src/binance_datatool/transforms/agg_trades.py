@@ -39,9 +39,15 @@ def bronze_agg_trades_to_silver(
     now_us = int(datetime.now(UTC).timestamp() * 1_000_000)
     exchange = exchange_for(trade_type)
 
+    transact_time_col = pl.col("transact_time").cast(pl.Int64)
+    is_us = transact_time_col >= 1_000_000_000_000_000
+
     result = df.with_columns(
         [
-            pl.col("transact_time").cast(pl.Int64).alias("ts_event"),
+            pl.when(is_us)
+            .then(transact_time_col)
+            .otherwise(transact_time_col * 1000)
+            .alias("ts_event"),
             pl.lit(now_us, dtype=pl.Int64).alias("ts_recv"),
             pl.col("price").cast(pl.Float64),
             pl.col("quantity").cast(pl.Float64).alias("size"),
@@ -72,9 +78,9 @@ def bronze_agg_trades_to_silver(
             pl.lit(symbol, dtype=pl.Utf8).alias("symbol"),
             pl.lit("aggTrades", dtype=pl.Utf8).alias("data_type"),
             pl.lit(now_us, dtype=pl.Int64).alias("ingested_at"),
-            (pl.col("transact_time").cast(pl.Int64) // 86_400_000)
-            .cast(pl.Int32)
-            .cast(pl.Date)
+            pl.when(is_us)
+            .then((transact_time_col // 86_400_000_000).cast(pl.Int32).cast(pl.Date))
+            .otherwise((transact_time_col // 86_400_000).cast(pl.Int32).cast(pl.Date))
             .alias("ts_date"),
         ]
     ).select(
