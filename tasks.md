@@ -393,78 +393,133 @@ Field:    17/17 field-level validations passing
 | ✅ | 31.1 | D | Updated AGENTS.md with new architecture, Prefect task pattern, dlt package docs |
 | ✅ | 32.1 | T | Full E2E validation: 308 tests + 8/8 E2E passing. Stale import paths cleaned up in prefect_flows.py |
 
-**Final Architecture**:
+---
+
+## Phase 27-28: dlt Resources Finalization (2026-05-13)
+
+| Status | ID | Type | Description |
+|--------|----|------|-------------|
+| ✅ | 27.1 | R | Created `dlt/resources/_client.py` — shared `client_for()` factory |
+| ✅ | 27.2 | R | Created `dlt/resources/binance_klines.py` with lazy imports |
+| ✅ | 27.3 | R | Created `dlt/resources/binance_agg_trades.py` |
+| ✅ | 27.4 | R | Created `dlt/resources/binance_funding.py` |
+| ✅ | 27.5 | R | Created `dlt/resources/binance_archive.py` (S3 ZIP CSV parser) |
+| ✅ | 27.6 | R | Created `dlt/resources/binance_ws.py` (WebSocket streaming) |
+| ✅ | 28.1 | R | Created `dlt/sources.py` — `build_binance_source`, `build_rest_source`, `build_ws_source` |
+
+## Phase 29-30: Prefect Tasks Extraction (2026-05-13)
+
+| Status | ID | Type | Description |
+|--------|----|------|-------------|
+| ✅ | 29.1 | R | Extracted `workflow/prefect_tasks/extract.py` — importable dlt extraction functions |
+| ✅ | 29.2 | R | Extracted `workflow/prefect_tasks/transform.py` — importable Silver transform functions |
+| ✅ | 30.1 | R | Thinned `prefect_flows.py` from ~1350 to ~1080 lines — delegates to prefect_tasks/ |
+
+## Phase 31-32: Documentation & Final Audit (2026-05-13)
+
+| Status | ID | Type | Description |
+|--------|----|------|-------------|
+| ✅ | 31.1 | D | Updated AGENTS.md: Stack Architecture table, dlt package docs, Prefect task pattern |
+| ✅ | 31.2 | D | Updated requirements.md: Phases 14-32 with full audit trail |
+| ✅ | 32.1 | T | Full baseline: 308 tests, 8/8 E2E, lint/format clean |
+
+## Phase 33: Schema Audit & DRY Consolidation (2026-05-14)
+
+| Status | ID | Type | Description |
+|--------|----|------|-------------|
+| ✅ | 33.1 | B | Fixed `SymbolMetaModel` missing `trade_type` field |
+| ✅ | 33.2 | R | DRY `_client_for()` → shared `dlt/resources/_client.py` (3x dedup) |
+| ✅ | 33.3 | B | Wired silver Pandera validation into `bronze_agg_trades_to_silver()` and `bronze_funding_rate_to_silver()` |
+| ✅ | 33.4 | B | Added `validate_silver_agg_trades()` and `validate_silver_funding_rate()` to schemas.py |
+| ✅ | 33.5 | D | Fixed klines.py docstring (removed false bronze validation claim) |
+| ✅ | 33.6 | D | Rewrote architecture.md: full package tree, dlt status "Implemented", new layers |
+| ✅ | 33.7 | D | Updated requirements.md: Phases 20-33 |
+| ✅ | 33.8 | D | Fixed AGENTS.md: workflow.archive→workflow, silver.agg_trades 16→18 columns |
+| ✅ | 33.9 | C | Cleaned orphaned .pyc files from adapter/, workflow/ |
+
+## Phase 34: dlt_sources Migration Completion (2026-05-14)
+
+| Status | ID | Type | Description |
+|--------|----|------|-------------|
+| ✅ | 34.1 | R | Migrated `dlt_sources/binance_metadata.py` → `dlt/resources/binance_metadata.py` |
+| ✅ | 34.2 | R | Migrated `dlt_sources/bronze_archive_index.py` → `dlt/resources/archive_index.py` |
+| ✅ | 34.3 | R | Converted old modules to forwarding wrappers — dlt_sources/ 100% forwarding-only |
+| ✅ | 34.4 | R | Fixed stale imports: prefect_flows.py (3), prefect_tasks/extract.py (1), tests (1) |
+| ✅ | 34.5 | D | Updated dlt/__init__.py exports (7 resource modules + archive index) |
+| ✅ | 34.6 | D | Updated dlt_sources/__init__.py to import from canonical dlt.resources.* paths |
+| ✅ | 34.7 | D | Updated extending.md — 6 comprehensive extension guides |
+| ✅ | 34.8 | T | Full baseline: 308 tests, 8/8 E2E, lint/format clean |
+
+## Phase 35: YAGNI Cleanup & Docs Consistency (2026-05-14)
+
+| Status | ID | Type | Description |
+|--------|----|------|-------------|
+| ✅ | 35.1 | C | Removed `adapter/` package (4 files, 444 lines) — zero production consumers |
+| ✅ | 35.2 | C | Removed `source_registry.py` (21 lines) — only used by adapter |
+| ✅ | 35.3 | C | Removed `validation/models.py` (16-line dead forwarding stub) |
+| ✅ | 35.4 | C | Removed dead test files: test_adapter_binance.py (406), test_source_registry.py (45) |
+| ✅ | 35.5 | D | Updated architecture.md — removed adapter/ and source_registry.py from package tree |
+| ✅ | 35.6 | D | Updated AGENTS.md — fixed 3 stale Known Issue file paths |
+| ✅ | 35.7 | D | Updated workflow-mapping.md — all stale dlt_sources/ → dlt/resources/ paths |
+| ✅ | 35.8 | D | Updated docs/reference/README.md — 5 new package sections |
+| ✅ | 35.9 | T | Final baseline: 271 tests, 8/8 E2E |
+
+## Phase 36: Code Quality & Data Integrity Fixes (2026-05-14)
+
+| Status | ID | Type | Description |
+|--------|----|------|-------------|
+| ✅ | 36.1 | B | **CRITICAL**: Added `WHERE symbol = ?` to transform_agg_trades and transform_funding_rate SQL |
+| ✅ | 36.2 | R | `exchange_for()` now raises `ValueError` on unknown trade type (SOLID fail-fast) |
+| ✅ | 36.3 | C | Removed unused `archive_home` param from `_parse_path()` (YAGNI) |
+| ✅ | 36.4 | C | Removed dead `_DEFAULT_ARCHIVE_HOME` from extract.py |
+| ✅ | 36.5 | R | Replaced redundant `build_rest_source()` local imports with `build_binance_source()` |
+| ✅ | 36.6 | C | Deleted zombie directories: src/bhds/, src/streaming_lakehouse/, src/bdt_common/, adapter/ remnants |
+| ✅ | 36.7 | D | Fixed AGENTS.md stale line references (klines.sql:29, binance_archive.py:196, binance_archive.py:72) |
+| ✅ | 36.8 | D | Updated requirements.md with Phase 36 |
+| ✅ | 36.9 | T | Final baseline: 271 tests, 8/8 E2E, lint/format clean |
+
+---
+
+## Current Architecture (2026-05-14)
+
 ```
 binance_datatool/
-├── dlt/                    # Standalone dlt package
-│   ├── __init__.py         # Exports all public API
-│   ├── models.py           # 8 Pydantic models
-│   ├── destinations.py     # build_pipeline, run_source (DuckDB/DuckLake)
-│   ├── sources.py          # 3 @dlt.source builders
-│   └── resources/          # 5 @dlt.resource modules
-├── storage/                # Storage abstraction
-│   ├── duckdb.py           # get_connection, write_silver_table
-│   └── catalog.py          # DuckLakeCatalog
-├── workflow/prefect_tasks/ # Importable business logic
-│   ├── extract.py          # dlt extraction functions
-│   └── transform.py        # Silver transform functions
-├── workflow/prefect_flows.py # Thin @flow + @task wrappers (~1080 lines)
-└── (common, exchange, archive, transforms, validation, cli unchanged)
+├── dlt/                        # Standalone dlt package — extract/load
+│   ├── __init__.py             # Exports 23 public symbols
+│   ├── models.py               # 8 Pydantic models (authoritative + raw)
+│   ├── destinations.py         # build_pipeline, run_source (DuckDB/DuckLake)
+│   ├── sources.py              # 3 @dlt.source builders
+│   └── resources/              # 8 resource modules
+│       ├── _client.py          # Shared client_for() — DRY trade-type dispatch
+│       ├── binance_klines.py   # REST klines resource
+│       ├── binance_agg_trades.py  # REST aggTrades resource
+│       ├── binance_funding.py  # REST fundingRate resource
+│       ├── binance_archive.py  # S3 ZIP CSV archive resource
+│       ├── binance_ws.py       # WebSocket streaming resource
+│       ├── binance_metadata.py # Venue + symbol metadata resources
+│       └── archive_index.py    # Local archive file index scanner
+├── dlt_sources/                # Legacy forwarding — all real logic in dlt/
+├── storage/                    # Storage abstraction
+│   ├── duckdb.py               # get_connection, write_silver_table
+│   └── catalog.py              # DuckLakeCatalog with TABLE_DEFS
+├── transforms/                 # Polars Bronze→Silver transforms (3 modules)
+├── validation/                 # Pandera schemas (6 + 2 metadata)
+│   └── schemas.py
+├── workflow/                   # Prefect orchestration
+│   ├── prefect_flows.py        # Thin @flow definitions (~1080 lines)
+│   └── prefect_tasks/          # Importable business logic
+│       ├── extract.py          # dlt extraction functions
+│       └── transform.py        # Silver transform functions
+├── common/                     # Shared enums, types, constants
+├── exchange/                   # Binance SDK REST/WS clients
+├── archive/                    # S3 archive client (data.binance.vision)
+└── cli/                        # Typer CLI layer
 ```
 
-**Current Architecture**:
-```
-binance_datatool/
-├── dlt/                    # Standalone dlt package
-│   ├── models.py           # Pydantic models for dlt validation
-│   ├── destinations.py     # build_pipeline, run_source
-│   ├── sources.py          # @dlt.source: build_binance_source, build_rest_source, build_ws_source
-│   └── resources/          # @dlt.resource per data type
-│       ├── binance_klines.py
-│       ├── binance_agg_trades.py
-│       ├── binance_funding.py
-│       ├── binance_archive.py
-│       └── binance_ws.py
-├── storage/                # Storage abstraction
-│   ├── duckdb.py           # get_connection, write_silver_table
-│   └── catalog.py          # DuckLakeCatalog
-├── transforms/             # Polars transforms (unchanged)
-├── validation/             # Pandera schemas (unchanged)
-├── workflow/               # Prefect orchestration
-│   ├── prefect_flows.py    # Thin @flow definitions only
-│   └── prefect_tasks/      # Importable business logic
-│       ├── extract.py      # dlt extraction functions
-│       └── transform.py    # Silver transform functions
-├── common/                 # Shared types (unchanged)
-├── exchange/               # Exchange clients (unchanged)
-├── archive/                # Archive client (unchanged)
-├── adapter/                # Adapter pattern (unchanged)
-└── cli/                    # CLI layer (unchanged)
-```
-
-**New Package Structure** (after Phases 24-26):
-```
-binance_datatool/
-├── dlt/                    # Standalone dlt package ✓
-│   ├── __init__.py         # Exports models + destinations
-│   ├── models.py           # Pydantic models (from validation/)
-│   ├── destinations.py     # build_pipeline, run_source (from dlt_sources/)
-│   └── resources/          # @dlt.resource files (future)
-├── storage/                # Storage abstraction layer ✓
-│   ├── duckdb.py           # get_connection, write_silver_table (from workflow/db.py)
-│   └── catalog.py          # DuckLakeCatalog (from workflow/legacy/catalog.py)
-├── dlt_sources/            # Legacy dlt sources (kept for backward compat)
-├── workflow/               # Thinned (kept for backward compat)
-└── validation/             # Kept for Pandera schemas (models re-exported)
-```
-
-**Backward Compatibility**: All old import paths still work via re-export stubs.
-
-**Audit Trail**: 32 planned phases over 2026-05-11 to 2026-05-13, covering:
-- Schema unification (exchange naming, Pandera types, bronze schemas)
-- DRY consolidation (4x _exchange_for → 1x exchange_for)
-- Bug fixes (S3 URL, SDK response access, archive μs timestamps, empty mark_price, SQLMesh VARCHAR)
-- YAGNI removal (IcebergCatalog, analytics views)
-- Test coverage (11 new transform tests, E2E correctness module)
-- Docs accuracy (schema-matrix.md, AGENTS.md, requirements.md, silver-layer-spec.md, column counts)
-- SQLMesh model hardening (VARCHAR fix, limitations docs)
+**Key Metrics**:
+- 271 tests (15 skipped), 8/8 E2E, lint/format/ty-check clean
+- 12 semantic atomic commits over Phases 33-36
+- dlt_sources/ → dlt/ migration complete (zero real logic in dlt_sources/)
+- adapter/, source_registry.py, validation/models.py removed (YAGNI)
+- 4 zombie directories cleaned (bhds, streaming_lakehouse, bdt_common, adapter remnants)
+- docs 100% accurate against codebase (architecture.md, AGENTS.md, extending.md, workflow-mapping.md, reference/README.md, requirements.md)
