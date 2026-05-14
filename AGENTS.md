@@ -33,7 +33,7 @@
 - Build the project as a modern Python package named `binance_datatool`.
 - Use the intended package layout: shared code under `binance_datatool.common`, archive access
   under `binance_datatool.archive`, CLI entrypoints under `binance_datatool.cli`, and business
-  workflows under `binance_datatool.workflow.archive`.
+  workflows under `binance_datatool.workflow`.
 - Prefer clear, composable workflows and thin CLI entrypoints.
 - Keep the root package minimal. Export only version metadata from `binance_datatool.__init__`.
 
@@ -63,7 +63,7 @@ dlt Sources (5 modules)
 Polars transforms (3 modules)
   ↓ Bronze → Silver with Pandera validation at boundaries
         silver.klines       (19 columns, normalized schema)
-        silver.agg_trades   (16 columns, normalized schema)
+        silver.agg_trades   (18 columns, normalized schema)
         silver.funding_rate (12 columns, normalized schema)
 Arrow writes → DuckDB silver tables
   ↓

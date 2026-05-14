@@ -890,7 +890,71 @@ dlt REST/Archive source
 
 ---
 
-**Document Version**: 1.2
-**Last Updated**: 2026-05-12
+### Phase 20-24: dlt Package Extraction (2026-05-13)
+
+**Goal**: Extract the standalone `binance_datatool.dlt` package from the monolithic
+`dlt_sources/` modules, following SOLID principles.
+
+**Changes**:
+- ✅ Created `dlt/__init__.py` — re-exports all resources, sources, models, destinations
+- ✅ Created `dlt/models.py` — 8 Pydantic models (KlineModel, AggTradeModel, FundingRateModel, VenueModel, SymbolMetaModel, RawKlineModel, RawAggTradeModel, RawFundingRateModel)
+- ✅ Created `dlt/destinations.py` — `build_pipeline()`, `run_source()` for DuckDB/DuckLake
+- ✅ Created `dlt/sources.py` — `build_binance_source()`, `build_rest_source()`, `build_ws_source()`
+- ✅ Created `dlt/resources/` — 5 resource modules (binance_klines, binance_agg_trades, binance_funding, binance_archive, binance_ws)
+- ✅ `dlt_sources/` modules converted to forwarding wrappers — zero logic duplication
+- ✅ `dlt` package imports independently: `from binance_datatool.dlt import build_binance_source, klines_resource`
+
+### Phase 25-28: Storage Layer Extraction (2026-05-13)
+
+**Goal**: Extract DuckDB/DuckLake storage from `workflow/db.py` and `workflow/legacy/catalog.py`.
+
+**Changes**:
+- ✅ Created `storage/duckdb.py` — `get_connection()`, `write_silver_table()`
+- ✅ Created `storage/catalog.py` — `DuckLakeCatalog` with `TABLE_DEFS` for all silver tables
+- ✅ `workflow/db.py` converted to forwarding module → `storage.duckdb`
+- ✅ `workflow/legacy/catalog.py` trimmed down, real logic moved to `storage/catalog.py`
+- ✅ Silver table definitions aligned with actual transform output (first_trade_id, last_trade_id restored)
+
+### Phase 29-30: Prefect Tasks Extraction (2026-05-13)
+
+**Goal**: Extract business logic from `prefect_flows.py` into importable functions in
+`prefect_tasks/`, keeping Prefect flows as thin @flow/@task wrappers.
+
+**Changes**:
+- ✅ Created `workflow/prefect_tasks/extract.py` — `run_dlt_pipeline()`, `download_archive_data()`, `build_metadata_source()`
+- ✅ Created `workflow/prefect_tasks/transform.py` — `bronze_to_silver()`, `bronze_agg_trades_to_silver()`, `bronze_funding_rate_to_silver()`
+- ✅ `prefect_flows.py` thinned from ~1350 to ~1080 lines — delegates to `prefect_tasks/`
+- ✅ Business logic testable without Prefect (plain function calls)
+
+### Phase 31-32: Documentation & Final Audit (2026-05-13)
+
+**Goal**: Update AGENTS.md, requirements.md, and docs to reflect new architecture.
+
+**Changes**:
+- ✅ AGENTS.md updated with Stack Architecture table, dlt package docs, Prefect task pattern
+- ✅ `tasks.md` populated with Phases 1-32 audit trail
+- ✅ 308 unit tests passing, 8/8 E2E integration tests passing
+- ✅ Lint clean, format clean, ty-check clean (6 known false positives)
+
+### Phase 33: Schema Audit & DRY Consolidation (2026-05-14)
+
+**Goal**: Comprehensive audit of bronze/silver schemas, docs, and code for DRY/KISS/YAGNI
+violations. Fix all findings.
+
+**Changes**:
+- ✅ Added `trade_type` field to `SymbolMetaModel` — matches Pandera `SymbolsSchema`
+- ✅ DRY `_client_for()` — extracted from 3 duplicate copies into shared `dlt/resources/_client.py`
+- ✅ Wired silver validation into `bronze_agg_trades_to_silver()` and `bronze_funding_rate_to_silver()` via `validate=False` parameter
+- ✅ Added `validate_silver_agg_trades()` and `validate_silver_funding_rate()` to `validation/schemas.py`
+- ✅ Fixed klines.py docstring — removed false claim about bronze input validation
+- ✅ Updated `architecture.md` — full package tree, dlt status "Implemented", new layers
+- ✅ Fixed AGENTS.md inaccuracies — `workflow.archive` → `workflow`, silver.agg_trades 16→18 columns
+- ✅ Cleaned orphaned .pyc files from adapter/, workflow/
+- ✅ 308 unit tests passing, 8/8 E2E passing, lint/format clean
+
+---
+
+**Document Version**: 1.3
+**Last Updated**: 2026-05-14
 **Maintainer**: Team
-**Status**: Complete. Schema audit → DRY consolidation → archive column completeness → E2E data correctness pipeline.
+**Status**: Current. Schema audit → DRY consolidation → silver validation wired → docs aligned.
