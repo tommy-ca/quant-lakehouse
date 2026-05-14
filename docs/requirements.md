@@ -952,9 +952,26 @@ violations. Fix all findings.
 - ✅ Cleaned orphaned .pyc files from adapter/, workflow/
 - ✅ 308 unit tests passing, 8/8 E2E passing, lint/format clean
 
+### Phase 34: dlt_sources Migration Completion & Import Cleanup (2026-05-14)
+
+**Goal**: Complete the migration of all real logic from `dlt_sources/` into `dlt/resources/`,
+fix stale import paths, and finalize the standalone dlt package.
+
+**Changes**:
+- ✅ Migrated `dlt_sources/binance_metadata.py` → `dlt/resources/binance_metadata.py` (venues_resource, symbols_resource, build_metadata_source)
+- ✅ Migrated `dlt_sources/bronze_archive_index.py` → `dlt/resources/archive_index.py` (archive_files_resource, build_archive_index_source)
+- ✅ Converted both old modules to forwarding wrappers (zero logic duplication)
+- ✅ Updated `dlt/__init__.py` to export all 7 resource modules + archive index
+- ✅ Updated `dlt_sources/__init__.py` to import from canonical `dlt.resources.*` paths (no more forwarding hops)
+- ✅ Fixed stale imports: `prefect_flows.py` (3 locations), `prefect_tasks/extract.py` (1 location), `tests/test_bronze_archive_index.py`
+- ✅ Updated `extending.md` with comprehensive extension guidance for dlt resources, transforms, validation, Prefect tasks, and SQLMesh models
+- ✅ Updated `architecture.md` to reflect completed migration
+- ✅ `dlt_sources/` now 100% forwarding-only — zero real logic; canonical source is `dlt/`
+- ✅ 308 unit tests passing, 8/8 E2E passing
+
 ---
 
-**Document Version**: 1.3
+**Document Version**: 1.4
 **Last Updated**: 2026-05-14
 **Maintainer**: Team
-**Status**: Current. Schema audit → DRY consolidation → silver validation wired → docs aligned.
+**Status**: Current. dlt_sources fully migrated → standalone dlt package complete.

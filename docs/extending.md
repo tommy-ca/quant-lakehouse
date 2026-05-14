@@ -88,6 +88,163 @@ See `list_symbols_command`, `list_files_command`, `download_command`, and
 Add tests at each layer. See [Test Organization](reference/testing.md) for directory layout,
 conventions, and shared fixtures.
 
+## Adding a New Data Type (Full Pipeline)
+
+To add a new data type (e.g. `"trades"`, `"bookDepth"`) end-to-end
+through the dlt + Polars + Pandera pipeline:
+
+### Step 1: Add a Pydantic Model
+
+Add authoritative and raw models to `dlt/models.py`:
+
+```python
+class TradeModel(BaseModel):
+    dlt_config: ClassVar[DltConfig] = {"is_authoritative_model": True}
+    trade_id: int
+    price: float
+    quantity: float
+    transact_time: int
+    symbol: str
+
+class RawTradeModel(BaseModel):
+    dlt_config: ClassVar[DltConfig] = {"is_authoritative_model": True}
+    trade_id: str
+    price: str
+    quantity: str
+    transact_time: str
+    symbol: str
+```
+
+### Step 2: Create a dlt Resource
+
+Create a new module in `dlt/resources/` (e.g. `binance_trades.py`):
+
+```python
+@dlt.resource(name="trades", write_disposition="merge",
+              primary_key=("symbol", "trade_id"),
+              columns=RawTradeModel)
+def trades_resource(symbol: str, trade_type: TradeType, ...) -> list[dict]:
+    client = client_for(trade_type)
+    raw = asyncio.run(client.fetch_trades(symbol, ...))
+    return [{"trade_id": str(t.id), "price": str(t.p), ...} for t in raw]
+```
+
+Register the resource in `dlt/__init__.py` and `dlt_sources/__init__.py`.
+Create a forwarding module in `dlt_sources/` for backward compat.
+
+### Step 3: Add Bronze and Silver Pandera Schemas
+
+Add schemas to `validation/schemas.py`:
+
+```python
+class BronzeTradesSchema(pa.DataFrameModel):
+    class Config: coerce = True; strict = True
+    trade_id: str = pa.Field(nullable=False)
+    ...
+
+class SilverTradesSchema(pa.DataFrameModel):
+    class Config: coerce = True; strict = True
+    ts_event: int = pa.Field(ge=0, nullable=False)
+    ...
+    ts_date: pl.Date = pa.Field(nullable=False)
+```
+
+Add validation helpers: `validate_silver_trades()`.
+
+### Step 4: Write a Polars Transform
+
+Create a new module in `transforms/`:
+
+```python
+def bronze_trades_to_silver(df: pl.DataFrame, *, symbol: str,
+                            trade_type: str, source: str, validate: bool = True):
+    result = df.with_columns([...]).select([...])
+    if validate:
+        validate_silver_trades(result)
+    return result
+```
+
+### Step 5: Wire into Prefect Tasks
+
+Add transformation dispatch to `workflow/prefect_tasks/transform.py`:
+
+```python
+if data_type == "trades":
+    return bronze_trades_to_silver(df, symbol=symbol, ...)
+```
+
+### Step 6: Add Tests
+
+Add at least:
+- Unit test for the dlt resource (mock exchange client)
+- Unit test for the Polars transform (fixture DataFrame)
+- Schema validation test (Pandera)
+- E2E integration test in `tests/test_e2e_correctness.py`
+
+## Adding a New dlt Resource
+
+1. Create a module in `dlt/resources/` using `client_for()` from `_client.py`
+   for REST API resources.
+2. Import and register in `dlt/__init__.py`.
+3. Create a forwarding module in `dlt_sources/` if backward compatibility is needed.
+4. Add tests mocking the exchange client.
+
+See `dlt/resources/binance_klines.py` and `dlt/resources/binance_agg_trades.py`
+for real examples.
+
+## Adding a New Prefect Flow or Task
+
+1. Add business logic to `workflow/prefect_tasks/extract.py` or
+   `workflow/prefect_tasks/transform.py` as plain importable functions.
+2. Create thin `@flow` or `@task` decorators in `workflow/prefect_flows.py`
+   that delegate to the functions in `prefect_tasks/`.
+3. Register new deployments in the `serve()` block at the bottom of
+   `prefect_flows.py`.
+
+See `workflow/prefect_tasks/extract.py` → `run_dlt_pipeline()` for a real example.
+
+## Adding a New Pandera Schema
+
+1. Add the schema class to `validation/schemas.py` using `pa.DataFrameModel`.
+2. Add a `validate_*()` helper function that wraps `Schema.validate(df, lazy=True)`.
+3. Wire the helper into the transform function for that data type.
+4. Ensure `ts_date` uses `pl.Date = pa.Field(nullable=False)`.
+
+See `BronzeKlinesSchema`, `SilverKlinesSchema`, and `validate_silver_klines()` for
+real examples.
+
+## Adding a New SQLMesh Model
+
+1. Create a SQL file in `models/bronze/` or `models/silver/` at the project root.
+2. Use `INCREMENTAL_BY_TIME_RANGE` for time-partitioned models.
+3. Run via `uv run sqlmesh plan` (optional — Polars transforms remain the primary path).
+
+See `models/bronze/klines.sql` and `models/silver/klines.sql` for real examples.
+
+## Adding a New CLI Command
+
+Follow the Prefect-based pattern for data pipeline commands
+or the legacy three-layer pattern for archive commands.
+
+### For Data Pipeline Commands (gap-fill, health, sink, refresh-metadata)
+
+Add a Typer command in `cli/archive.py` that delegates to a workflow class
+in `workflow/`. Example:
+
+```python
+@app.command("gap-fill")
+def gap_fill_command(trade_type, symbol, ...):
+    """Backfill missing data via REST API."""
+    wf = GapFillWorkflow(trade_type=TradeType(trade_type), ...)
+    result = wf.run()
+    typer.echo(json.dumps(result))
+```
+
+### For Archive Commands (list-symbols, list-files, download, verify)
+
+Follow the legacy pattern: **CLI → Workflow → Client**.
+See `cli/archive.py` → `workflow/download.py` → `archive/client.py` for examples.
+
 ## Adding a New Sub-command Group
 
 To add a command group alongside the current root data commands
@@ -115,3 +272,15 @@ To add a command group alongside the current root data commands
 
 For the test directory layout, conventions, and shared fixtures, see
 [Test Organization](reference/testing.md).
+
+### Test Categories
+
+| Test Type | Directory | Example |
+|-----------|-----------|---------|
+| dlt resource tests | `tests/test_dlt_sources.py` | Mock exchange client, assert resource output |
+| Transform tests | `tests/test_transforms.py` | Fixture DataFrames, assert silver column mapping |
+| Validation tests | `tests/test_validation.py` | Assert Pandera schema enforcement |
+| Archive index tests | `tests/test_bronze_archive_index.py` | Assert path parsing and file discovery |
+| E2E correctness | `tests/test_e2e_correctness.py` | Full raw→bronze→silver pipeline (requires `--run-integration`) |
+| Workflow tests | `tests/test_*.py` | Mock archive clients, assert workflow outcomes |
+| CLI tests | `tests/test_cli_*.py` | Typer test runner, assert stdout |

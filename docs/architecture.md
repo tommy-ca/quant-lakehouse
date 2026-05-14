@@ -29,14 +29,14 @@ src/binance_datatool/
 │       ├── binance_funding.py
 │       ├── binance_archive.py
 │       └── binance_ws.py
-├── dlt_sources/             # Legacy forwarding modules + 2 real-logic modules pending migration
+├── dlt_sources/             # Legacy forwarding modules — all real logic migrated to dlt/resources/
 │   ├── binance.py           # Forwarding → dlt.resources.binance_klines + dlt.sources
 │   ├── binance_rest.py      # Forwarding → dlt.resources (agg_trades, funding) + dlt.sources
 │   ├── binance_ws.py        # Forwarding → dlt.resources.binance_ws + dlt.sources
 │   ├── binance_archive.py   # Forwarding → dlt.resources.binance_archive
 │   ├── pipeline.py          # Forwarding → dlt.destinations
-│   ├── binance_metadata.py  # Real logic — venue/symbol metadata resources (not yet in dlt/)
-│   └── bronze_archive_index.py # Real logic — archive file index scanner
+│   ├── binance_metadata.py  # Forwarding → dlt.resources.binance_metadata
+│   └── bronze_archive_index.py  # Forwarding → dlt.resources.archive_index
 ├── transforms/              # Polars transforms (Bronze → Silver)
 │   ├── klines.py            # bronze_klines_to_silver() + μs auto-detection
 │   ├── agg_trades.py        # bronze_agg_trades_to_silver() + side derivation + Pandera validation
@@ -247,4 +247,4 @@ the complete field-to-source mapping matrix.
 | Empty `mark_price` in CM fundingRate | `transforms/funding_rate.py` | Replaced with "0" before Float64 cast | Resolved |
 | DuckLake concurrency guard | `prefect_flows.py` | Serialized via `concurrency("ducklake-writer")` | Resolved |
 | S3 listing slow for full archive | `archive/client.py` | Full listing of BTCUSDT 1d = ~6400 files, ~30s | Use `lookback_days` to limit |
-| binance_metadata.py + bronze_archive_index.py | `dlt_sources/` | Real logic not yet migrated to `dlt/resources/` | Pending migration |
+| binance_metadata.py + bronze_archive_index.py | `dlt_sources/` | Real logic migrated to `dlt/resources/` | Resolved |
