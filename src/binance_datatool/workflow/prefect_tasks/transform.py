@@ -50,7 +50,8 @@ def transform_agg_trades(
         bronze = con.execute(
             "SELECT agg_trade_id, price, quantity, transact_time, "
             "is_buyer_maker, first_trade_id, last_trade_id, symbol "
-            "FROM bronze.agg_trades"
+            "FROM bronze.agg_trades WHERE symbol = ?",
+            [symbol],
         ).pl()
         silver = bronze_agg_trades_to_silver(bronze, symbol=symbol, trade_type=trade_type)
         if silver.is_empty():
@@ -69,7 +70,8 @@ def transform_funding_rate(
     con = get_connection(catalog_path=catalog_path)
     try:
         bronze = con.execute(
-            "SELECT symbol, funding_time, funding_rate FROM bronze.funding_rate"
+            "SELECT symbol, funding_time, funding_rate FROM bronze.funding_rate WHERE symbol = ?",
+            [symbol],
         ).pl()
         silver = bronze_funding_rate_to_silver(bronze, symbol=symbol, trade_type=trade_type)
         if silver.is_empty():

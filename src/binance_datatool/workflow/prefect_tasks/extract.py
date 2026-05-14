@@ -19,8 +19,6 @@ from binance_datatool.dlt.sources import build_binance_source
 from binance_datatool.workflow.archive_cache import ArchiveFileCache
 from binance_datatool.workflow.gap_detection import detect_bronze_gaps as _detect_gaps
 
-_DEFAULT_ARCHIVE_HOME = None  # Set by caller
-
 
 def _resolve_db(catalog_path: str | None, _archive_home: Path | None = None) -> str:
     if catalog_path:
@@ -47,10 +45,8 @@ def extract_agg_trades(
     catalog_path: str | None = None,
 ) -> dict:
     """Run dlt pipeline to ingest Binance aggTrades for one symbol."""
-    from binance_datatool.dlt.sources import build_rest_source
-
     tt = TradeType(trade_type)
-    source = build_rest_source(symbols=[symbol], data_type="aggTrades", trade_type=tt)
+    source = build_binance_source(symbols=[symbol], data_type="aggTrades", trade_type=tt)
     return _run_dlt(source, source_name=f"agg_trades_{trade_type}", catalog_path=catalog_path)
 
 
@@ -60,10 +56,8 @@ def extract_funding_rate(
     catalog_path: str | None = None,
 ) -> dict:
     """Run dlt pipeline to ingest Binance fundingRate for one symbol."""
-    from binance_datatool.dlt.sources import build_rest_source
-
     tt = TradeType(trade_type)
-    source = build_rest_source(symbols=[symbol], data_type="fundingRate", trade_type=tt)
+    source = build_binance_source(symbols=[symbol], data_type="fundingRate", trade_type=tt)
     return _run_dlt(source, source_name=f"funding_rate_{trade_type}", catalog_path=catalog_path)
 
 

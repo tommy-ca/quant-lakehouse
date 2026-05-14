@@ -92,8 +92,15 @@ def exchange_for(trade_type: str) -> str:
 
     Returns:
         Exchange name string (e.g. ``"binance-spot"``, ``"binance-perps-um"``).
+
+    Raises:
+        ValueError: If ``trade_type`` is not one of ``"spot"``, ``"um"``, ``"cm"``.
     """
-    return _DUCKLAKE_EXCHANGE_NAMES.get(trade_type, "binance-spot")
+    if trade_type not in _DUCKLAKE_EXCHANGE_NAMES:
+        raise ValueError(
+            f"Unknown trade_type {trade_type!r}. Expected one of {list(_DUCKLAKE_EXCHANGE_NAMES)}"
+        )
+    return _DUCKLAKE_EXCHANGE_NAMES[trade_type]
 
 
 class ContractType(StrEnum):

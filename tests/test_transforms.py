@@ -153,9 +153,10 @@ class TestBronzeKlinesToSilver:
         """Verify trade_type → exchange name mapping."""
         assert exchange_for(tt) == expected
 
-    def test_unknown_trade_type_defaults_to_spot(self):
-        """Verify unknown trade_type falls back to binance-spot."""
-        assert exchange_for("unknown") == "binance-spot"
+    def test_unknown_trade_type_raises(self):
+        """Verify unknown trade_type raises ValueError."""
+        with pytest.raises(ValueError, match="Unknown trade_type"):
+            exchange_for("unknown")
 
     def test_ts_date_is_derived_from_open_time(self):
         """Verify ts_date is correctly computed from open_time (ms → date)."""

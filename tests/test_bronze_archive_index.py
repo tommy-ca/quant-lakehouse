@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from binance_datatool.dlt.resources.archive_index import (
     _parse_path,
     archive_files_resource,
@@ -15,9 +13,7 @@ class TestParsePath:
     """Tests for ``_parse_path`` — archive file path parser."""
 
     def test_spot_klines(self):
-        meta = _parse_path(
-            "data/spot/daily/klines/BTCUSDT/1h/BTCUSDT-klines-1h-2024-01-01.zip", Path("/a")
-        )
+        meta = _parse_path("data/spot/daily/klines/BTCUSDT/1h/BTCUSDT-klines-1h-2024-01-01.zip")
         assert meta is not None
         assert meta["trade_type"] == "spot"
         assert meta["data_type"] == "klines"
@@ -28,7 +24,6 @@ class TestParsePath:
     def test_um_funding_rate(self):
         meta = _parse_path(
             "data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2024-01.zip",
-            Path("/a"),
         )
         assert meta is not None
         assert meta["trade_type"] == "um"
@@ -40,7 +35,6 @@ class TestParsePath:
     def test_cm_agg_trades(self):
         meta = _parse_path(
             "data/futures/cm/daily/aggTrades/BTCUSD_PERP/BTCUSD_PERP-aggTrades-2024-01-01.zip",
-            Path("/a"),
         )
         assert meta is not None
         assert meta["trade_type"] == "cm"
@@ -48,20 +42,18 @@ class TestParsePath:
         assert meta["date"] == "2024-01-01"
 
     def test_spot_agg_trades_no_interval(self):
-        meta = _parse_path(
-            "data/spot/daily/aggTrades/ETHUSDT/ETHUSDT-aggTrades-2024-06-15.zip", Path("/a")
-        )
+        meta = _parse_path("data/spot/daily/aggTrades/ETHUSDT/ETHUSDT-aggTrades-2024-06-15.zip")
         assert meta is not None
         assert meta["symbol"] == "ETHUSDT"
         assert meta["interval"] is None
         assert meta["data_type"] == "aggTrades"
 
     def test_malformed_path_returns_none(self):
-        assert _parse_path("not_data/something.txt", Path("/a")) is None
-        assert _parse_path("data/spot/daily/klines/BTCUSDT.xyz", Path("/a")) is None
+        assert _parse_path("not_data/something.txt") is None
+        assert _parse_path("data/spot/daily/klines/BTCUSDT.xyz") is None
 
     def test_file_name_extracted(self):
-        meta = _parse_path("data/spot/daily/trades/BTCUSDT/trades-2024-01-01.zip", Path("/a"))
+        meta = _parse_path("data/spot/daily/trades/BTCUSDT/trades-2024-01-01.zip")
         assert meta is not None
         assert meta["file_name"] == "trades-2024-01-01.zip"
 

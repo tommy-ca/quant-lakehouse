@@ -30,12 +30,11 @@ _S3_PATH_MAP = {
 }
 
 
-def _parse_path(rel_path: str, archive_home: Path) -> dict[str, Any] | None:
+def _parse_path(rel_path: str) -> dict[str, Any] | None:
     """Parse a relative archive path into metadata fields.
 
     Args:
         rel_path: Relative path like ``data/spot/daily/klines/BTCUSDT/1h/file.zip``.
-        archive_home: Archive root (unused here, kept for interface compat).
 
     Returns:
         Dict with file metadata or None if path can't be parsed.
@@ -123,7 +122,7 @@ def archive_files_resource(
     results: list[dict[str, Any]] = []
     for fpath in sorted(data_dir.rglob("*.zip")):
         rel = str(fpath.relative_to(home))
-        meta = _parse_path(rel, home)
+        meta = _parse_path(rel)
         if meta:
             results.append(meta)
     return results
