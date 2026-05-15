@@ -257,6 +257,8 @@ def archive_data_resource(
     s3_keys: list[str],
     interval: str | None = None,
     data_type: str = "klines",
+    use_s5cmd: bool = False,
+    s5cmd_concurrency: int = 10,
 ) -> dlt.Resource:
     """Build a dlt resource for one symbol from pre-resolved S3 file keys.
 
@@ -269,43 +271,60 @@ def archive_data_resource(
         interval: Kline interval (required for ``"klines"``).
         data_type: One of ``"klines"``, ``"aggTrades"``, ``"trades"``,
             ``"fundingRate"``.
+        use_s5cmd: Use s5cmd for parallel batch downloads instead of
+            aiohttp. Requires s5cmd installed. Faster for many files.
+        s5cmd_concurrency: Number of parallel s5cmd connections.
 
     Returns:
         Configured ``dlt.Resource``.
     """
     _table = _TABLE_MAP.get(data_type, data_type.replace("-", "_"))
 
-    def _gen() -> list[list[dict[str, Any]]]:
-        if not s3_keys:
-            return []
+    if use_s5cmd:
+        from binance_datatool.archive.s5cmd_download import download_and_parse
 
-        async def _fetch(key: str) -> str:
-            import aiohttp
+        def _gen() -> list[list[dict[str, Any]]]:
+            return download_and_parse(
+                s3_keys,
+                symbol=symbol,
+                data_type=data_type,
+                interval=interval,
+                concurrency=s5cmd_concurrency,
+            )
 
-            url = f"{S3_DOWNLOAD_PREFIX}/{key}"
-            async with (
-                aiohttp.ClientSession() as session,
-                session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp,
-            ):
-                raw = await resp.read()
-            with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-                csv_name = next(n for n in zf.namelist() if n.endswith(".csv"))
-                return zf.read(csv_name).decode()
+    else:
 
-        async def _fetch_all() -> list[tuple[int, list[dict[str, Any]] | None]]:
-            async def _one(idx: int, key: str) -> tuple[int, list[dict[str, Any]] | None]:
-                try:
-                    text = await _fetch(key)
-                    rows = _parse_csv_rows(text, data_type, symbol, interval)
-                    return idx, rows if rows else None
-                except Exception:
-                    return idx, None
+        def _gen() -> list[list[dict[str, Any]]]:
+            if not s3_keys:
+                return []
 
-            tasks = [_one(i, k) for i, k in enumerate(s3_keys)]
-            return await asyncio.gather(*tasks)
+            async def _fetch(key: str) -> str:
+                import aiohttp
 
-        gathered = asyncio.run(_fetch_all())
-        return [r for _, r in sorted(gathered) if r is not None]
+                url = f"{S3_DOWNLOAD_PREFIX}/{key}"
+                async with (
+                    aiohttp.ClientSession() as session,
+                    session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp,
+                ):
+                    raw = await resp.read()
+                with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                    csv_name = next(n for n in zf.namelist() if n.endswith(".csv"))
+                    return zf.read(csv_name).decode()
+
+            async def _fetch_all() -> list[tuple[int, list[dict[str, Any]] | None]]:
+                async def _one(idx: int, key: str) -> tuple[int, list[dict[str, Any]] | None]:
+                    try:
+                        text = await _fetch(key)
+                        rows = _parse_csv_rows(text, data_type, symbol, interval)
+                        return idx, rows if rows else None
+                    except Exception:
+                        return idx, None
+
+                tasks = [_one(i, k) for i, k in enumerate(s3_keys)]
+                return await asyncio.gather(*tasks)
+
+            gathered = asyncio.run(_fetch_all())
+            return [r for _, r in sorted(gathered) if r is not None]
 
     return dlt.resource(
         _gen,
