@@ -523,3 +523,34 @@ binance_datatool/
 - adapter/, source_registry.py, validation/models.py removed (YAGNI)
 - 4 zombie directories cleaned (bhds, streaming_lakehouse, bdt_common, adapter remnants)
 - docs 100% accurate against codebase (architecture.md, AGENTS.md, extending.md, workflow-mapping.md, reference/README.md, requirements.md)
+
+---
+
+## Phase 39: Archive CSV Format Fixes & Full E2E Coverage (2026-05-14)
+
+**Goal**: Debug and fix archive source failures for um/cm klines, um/cmt aggTrades, and um/cm fundingRate. Validate with s5cmd. Achieve 14/14 E2E pass rate.
+
+**s5cmd Research Findings**:
+- All data files confirmed present on `data.binance.vision` S3 bucket
+- Binance recently added CSV headers to derivatives (um/cm) klines files but NOT to spot klines
+- UM/CM klines: `open_time,open,high,...` header present for May 2026 files
+- Spot klines: raw data, no header
+- UM aggTrades: has header, missing `is_best_match` column (7 cols vs 8 expected)
+- UM/CM fundingRate: has header, files available
+
+**Code Changes**:
+| Bug | Root Cause | Fix |
+|-----|-----------|-----|
+| um/cm klines: 0 rows extracted | `_has_header()` hardcoded to return True only for `fundingRate`. Header row `open_time` parsed as int → ValueError | Auto-detect header via `_has_header(parts)`: if first cell is non-numeric, it's a header |
+| um aggTrades: IndexError | CSV has 7 columns, `_BRONZE_COLS` expects 8 (`is_best_match` missing). Loop accesses `parts[i]` beyond array bounds | Guard with `if i >= len(parts): continue` |
+| Archive E2E test bug | fundingRate test referenced `bronze["open_time"]` (wrong column) and wrote to wrong silver table | Fixed column names and removed redundant assertion |
+| aggTrades/fundingRate µs overflow | Archive timestamps in µs (16-digit), transforms divided by ms divisor 86400000 | Added µs auto-detection (`>= 1e15`) to both transforms (see Phase 39a commit) |
+
+**Results**:
+| ✅ | 39.1 | B | Auto-detect CSV headers instead of hardcoded `_has_header()` |
+| ✅ | 39.2 | B | Handle CSV rows with fewer columns than expected (guard against IndexError) |
+| ✅ | 39.3 | B | Add µs timestamp auto-detection to aggTrades and fundingRate transforms |
+| ✅ | 39.4 | T | E2E archive tests for all 14 combos: 3 klines (spot/um/cm), 2 aggTrades (spot/um), 2 fundingRate (um/cm) + 6 REST + cross-table |
+| ✅ | 39.5 | R | Validated data availability with s5cmd against data.binance.vision S3 |
+
+**Final Baseline**: 275 tests, 14/14 E2E, lint/format clean

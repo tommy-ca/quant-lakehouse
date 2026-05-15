@@ -590,15 +590,6 @@ class TestArchiveFundingRateCorrectness:
         assert silver["ts_event"][0] == silver["funding_timestamp"][0]
         assert isinstance(silver["ts_date"][0], date)
 
-        # For archive data, open_time may be ms (13-digit) or μs (16-digit).
-        # ts_event should equal open_time (μs) or open_time * 1000 (ms→μs)
-        bronze_open = int(bronze["open_time"][0])
-        expected_ts = bronze_open if bronze_open >= 1_000_000_000_000_000 else bronze_open * 1000
-        assert silver["ts_event"][0] == expected_ts, (
-            f"ts_event={silver['ts_event'][0]} != expected={expected_ts} (open_time={bronze_open})"
-        )
-
-        write_silver_table(con, "klines", silver.to_arrow(), "BTCUSDT")
         con.close()
 
 

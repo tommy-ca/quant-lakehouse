@@ -115,8 +115,15 @@ _TABLE_MAP: dict[str, str] = {
 }
 
 
-def _has_header(data_type: str) -> bool:
-    return data_type in ("fundingRate",)
+def _has_header(first_row_parts: list[str]) -> bool:
+    """Detect whether the first CSV row is a header by checking cell type."""
+    if not first_row_parts:
+        return False
+    try:
+        int(first_row_parts[0].strip())
+        return False
+    except ValueError:
+        return True
 
 
 def _parse_csv_rows(
@@ -125,15 +132,20 @@ def _parse_csv_rows(
     reader = csv.reader(io.StringIO(text))
     cols = _BRONZE_COLS[data_type]
     rows: list[dict[str, Any]] = []
-    for line_no, parts in enumerate(reader):
-        if _has_header(data_type) and line_no == 0:
-            continue
-        if len(parts) < len(cols):
+    skip_header: bool | None = None
+    for parts in reader:
+        if skip_header is None:
+            skip_header = _has_header(parts)
+            if skip_header:
+                continue
+        if len(parts) < len(cols) - 1:
             continue
         row: dict[str, Any] = {"symbol": symbol}
         if interval is not None and data_type == "klines":
             row["interval"] = interval
         for i, col in enumerate(cols):
+            if i >= len(parts):
+                continue
             raw = parts[i].strip()
             if not raw:
                 continue
