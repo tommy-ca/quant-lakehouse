@@ -1028,9 +1028,52 @@ remove dead code, and tighten error handling.
 
 **Final Baseline**: 271 tests, 8/8 E2E, lint/format clean
 
+### Phase 37-38: Test Import Cleanup & Schema-Matrix Fixes (2026-05-14)
+
+**Goal**: Update test imports from `dlt_sources/*` to canonical `dlt/*` paths. Fix schema-matrix.md
+column count gaps and mark stale docs with historical notices.
+
+**Changes**:
+- ✅ Updated 11 stale `dlt_sources.*` test imports to canonical `dlt.resources.*` / `dlt.sources` / `dlt.destinations` paths
+- ✅ Fixed 1 dead mock patch target in `test_dlt_sources.py`
+- ✅ Fixed schema-matrix.md: added missing silver columns (source, ts_date, first_trade_id, last_trade_id, trade_type)
+- ✅ Fixed schema-matrix.md Section 6 timestamp contradiction (ms → μs)
+- ✅ Added historical notices to INDEX.md, implementation-guide.md, data-flows.md, FORMAL_SPECIFICATION.md
+
+### Phase 39: Archive CSV Format Fixes & Full E2E Coverage (2026-05-14)
+
+**Goal**: Debug and fix archive source failures for um/cm using s5cmd. Achieve 14/14 E2E pass rate.
+
+**Root Cause**: Binance recently added CSV headers to derivatives (um/cm) files but NOT spot.
+The hardcoded `_has_header()` only handled `fundingRate`.
+
+**Code Changes**:
+- ✅ Auto-detect CSV headers by checking if first cell is non-numeric (replaces `_has_header(data_type)`)
+- ✅ Guard against IndexError when CSV has fewer columns than `_BRONZE_COLS` (um aggTrades missing `is_best_match`)
+- ✅ Added µs timestamp auto-detection to aggTrades and fundingRate transforms (was only in klines)
+- ✅ Fixed archive fundingRate E2E test (wrong column name `open_time` → `funding_time`)
+
+**E2E Matrix — 14/14 passing**:
+```
+REST:   klines[spot] klines[um] aggTrades[spot] aggTrades[um] fundingRate[um] fundingRate[cm]
+Archive: klines[spot] klines[um] klines[cm] aggTrades[spot] aggTrades[um] fundingRate[um] fundingRate[cm]
+Cross:   ts_date
+```
+
+### Phase 40: Archive Coverage Gap Analysis (2026-05-15)
+
+**Goal**: Document remaining archive data types available via CLI `download` but not in dlt archive source.
+
+**s5cmd-confirmed gaps** (7 data types on S3 not in dlt):
+trades (schema defined, no E2E test), bookDepth, bookTicker, indexPriceKlines,
+markPriceKlines, premiumIndexKlines, metrics, liquidationSnapshot.
+
+Adding dlt support requires: `_BRONZE_COLS` + `_DATA_TYPE_COLUMNS` + `_TABLE_MAP` +
+Pandera schema + Polars transform + E2E test. Deferred pending demand.
+
 ---
 
-**Document Version**: 1.6
-**Last Updated**: 2026-05-14
+**Document Version**: 1.7
+**Last Updated**: 2026-05-15
 **Maintainer**: Team
-**Status**: Stable. Critical bug fixed → code quality tightened → zombie dirs removed.
+**Status**: Production-stable. 14/14 E2E archive coverage for active data types. 7 deferred extensions.

@@ -554,3 +554,48 @@ binance_datatool/
 | ✅ | 39.5 | R | Validated data availability with s5cmd against data.binance.vision S3 |
 
 **Final Baseline**: 275 tests, 14/14 E2E, lint/format clean
+
+---
+
+## Phase 40: Archive Coverage Gap Analysis (2026-05-15)
+
+**Goal**: Document remaining archive data types available via CLI `download` but not yet
+supported in the dlt archive source.
+
+### s5cmd Data Inventory
+
+| Data Type | Spot | UM | CM | dlt Archive | CLI Download |
+|-----------|------|----|----|-------------|-------------|
+| klines | ✅ | ✅ | ✅ | ✅ | ✅ |
+| aggTrades | ✅ | ✅ | ✅ | ✅ | ✅ |
+| trades | ✅ | ✅ | ✅ | ✅ (schema only) | ✅ |
+| fundingRate | — | ✅ | ✅ | ✅ | ✅ |
+| bookDepth | ❌ empty | ✅ | ✅ | ❌ | ✅ |
+| bookTicker | ❌ empty | ✅ | ✅ | ❌ | ✅ |
+| indexPriceKlines | — | ✅ | ✅ | ❌ | ✅ |
+| markPriceKlines | — | ✅ | ✅ | ❌ | ✅ |
+| premiumIndexKlines | — | ✅ | ✅ | ❌ | ✅ |
+| metrics | — | ✅ | ✅ | ❌ | ✅ |
+| liquidationSnapshot | — | — | ✅ | ❌ | ✅ |
+
+### Gap: 7 data types not in dlt archive source
+
+| # | Data Type | Markets | Notes |
+|---|-----------|---------|-------|
+| 7.1 | `trades` | spot, um, cm | Schema defined in `_BRONZE_COLS`, `_DATA_TYPE_COLUMNS`, `_TABLE_MAP` but no E2E test |
+| 7.2 | `bookDepth` | um, cm | Level-2 order book snapshots |
+| 7.3 | `bookTicker` | um, cm | Best bid/ask snapshots |
+| 7.4 | `indexPriceKlines` | um, cm | Index price kline bars |
+| 7.5 | `markPriceKlines` | um, cm | Mark price kline bars |
+| 7.6 | `premiumIndexKlines` | um, cm | Premium index kline bars |
+| 7.7 | `metrics` | um, cm | Market metrics |
+
+To add dlt archive support for a new data type:
+1. Add `_BRONZE_COLS`, `_DATA_TYPE_COLUMNS`, `_PRIMARY_KEYS` entries
+2. Add to `_TABLE_MAP`
+3. Create Pandera schema in `validation/schemas.py`
+4. Create Polars transform in `transforms/`
+5. Add E2E test in `tests/test_e2e_correctness.py`
+
+**Status**: Deferred. All 4 currently active data types (klines, aggTrades, fundingRate, trades)
+are fully supported. The remaining 7 are future extensions pending user demand.
