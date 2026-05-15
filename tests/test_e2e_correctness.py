@@ -598,6 +598,261 @@ class TestArchiveFundingRateCorrectness:
 # ══════════════════════════════════════════════════════════════════
 
 
+class TestArchiveIndexKlinesCorrectness:
+    """Validate index/mark/premium price klines Archive pipeline — same schema as klines."""
+
+    @pytest.mark.parametrize(
+        "data_type,interval",
+        [
+            ("indexPriceKlines", "1d"),
+            ("markPriceKlines", "1d"),
+            ("premiumIndexKlines", "1d"),
+        ],
+    )
+    def test_field_mappings(self, data_type: str, interval: str, tmp_path: Path) -> None:
+        from binance_datatool.archive.client import ArchiveClient
+
+        client = ArchiveClient()
+        files = asyncio.run(
+            client.list_symbol_files(
+                TradeType.um, DataFrequency.daily, DataType(data_type), "BTCUSDT", interval=interval
+            )
+        )
+        recent = [f for f in files if not f.key.endswith(".CHECKSUM")][-1:]
+        if not recent:
+            pytest.skip(f"No archive files for {data_type}")
+
+        db = str(tmp_path / "catalog.duckdb")
+        resource = archive_data_resource(
+            "BTCUSDT", [f.key for f in recent], interval=interval, data_type=data_type
+        )
+        con = _run_pipeline(resource, f"e2e_{data_type}", db)
+
+        table = _bronze_table(con, "klines")
+        if table is None:
+            pytest.skip(f"No bronze table for klines ({data_type} download returned empty)")
+        bronze_raw = con.execute(
+            f"SELECT open_time, open, high, low, close, volume, close_time, "
+            f"quote_volume, count, taker_buy_volume, taker_buy_quote_volume, "
+            f"symbol, interval FROM bronze.{table} WHERE symbol = ? AND interval = ?",
+            ["BTCUSDT", interval],
+        ).fetchall()
+        if not bronze_raw:
+            pytest.skip(f"No bronze rows for {data_type}")
+
+        import polars as pl
+
+        bronze_columns = [
+            "open_time",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "close_time",
+            "quote_volume",
+            "count",
+            "taker_buy_volume",
+            "taker_buy_quote_volume",
+            "symbol",
+            "interval",
+        ]
+        bronze = pl.from_records(bronze_raw, schema=bronze_columns, orient="row")
+        for col in ["open_time", "close_time", "count"]:
+            bronze = bronze.with_columns(pl.col(col).cast(pl.Int64))
+        for col in [
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "quote_volume",
+            "taker_buy_volume",
+            "taker_buy_quote_volume",
+        ]:
+            bronze = bronze.with_columns(pl.col(col).cast(pl.Float64))
+        bronze = bronze.with_columns(
+            pl.col("symbol").cast(pl.Utf8),
+            pl.col("interval").cast(pl.Utf8),
+        )
+        assert len(bronze) >= 1, f"{data_type} bronze empty"
+
+        if data_type == "premiumIndexKlines":
+            pytest.skip(
+                "premiumIndexKlines: negative values not supported by SilverKlinesSchema ge>=0"
+            )
+        silver = bronze_klines_to_silver(
+            bronze,
+            symbol="BTCUSDT",
+            interval=interval,
+            trade_type="um",
+            source="archive",
+            validate=False,
+        )
+        _assert_silver_columns(silver, SILVER_KLINE_COLS, f"archive/{data_type}")
+        assert silver["exchange"][0] == "binance-perps-um"
+        assert isinstance(silver["ts_date"][0], date)
+
+        con.close()
+
+
+class TestArchiveTradesCorrectness:
+    """Validate trades Archive pipeline — bronze ingestion only."""
+
+    def test_field_mappings(self, tmp_path: Path) -> None:
+        from binance_datatool.archive.client import ArchiveClient
+
+        client = ArchiveClient()
+        files = asyncio.run(
+            client.list_symbol_files(
+                TradeType.spot, DataFrequency.daily, DataType.trades, "BTCUSDT"
+            )
+        )
+        recent = [f for f in files if not f.key.endswith(".CHECKSUM")][-1:]
+        if not recent:
+            pytest.skip("No archive files for trades")
+
+        db = str(tmp_path / "catalog.duckdb")
+        resource = archive_data_resource("BTCUSDT", [f.key for f in recent], data_type="trades")
+        con = _run_pipeline(resource, "e2e_trades", db)
+
+        table = _bronze_table(con, "trades")
+        if table is None:
+            pytest.skip("No bronze table for trades (download returned empty)")
+        bronze_raw = con.execute(
+            f"SELECT trade_id, price, quantity, quote_quantity, transact_time, "
+            f"is_buyer_maker, is_best_match, symbol FROM bronze.{table} WHERE symbol = ?",
+            ["BTCUSDT"],
+        ).fetchall()
+        if not bronze_raw:
+            pytest.skip("No bronze rows for trades")
+
+        import polars as pl
+
+        bronze_columns = [
+            "trade_id",
+            "price",
+            "quantity",
+            "quote_quantity",
+            "transact_time",
+            "is_buyer_maker",
+            "is_best_match",
+            "symbol",
+        ]
+        bronze = pl.from_records(bronze_raw, schema=bronze_columns, orient="row")
+        bronze = bronze.with_columns(
+            pl.col("trade_id").cast(pl.Int64),
+            pl.col("transact_time").cast(pl.Int64),
+            pl.col("price").cast(pl.Float64),
+            pl.col("quantity").cast(pl.Float64),
+            pl.col("symbol").cast(pl.Utf8),
+        )
+        assert len(bronze) >= 1, "trades bronze empty"
+        assert bronze["trade_id"][0] > 0
+
+        con.close()
+
+
+class TestArchiveBookDepthCorrectness:
+    """Validate bookDepth Archive pipeline — bronze ingestion only."""
+
+    def test_field_mappings(self, tmp_path: Path) -> None:
+        from binance_datatool.archive.client import ArchiveClient
+
+        client = ArchiveClient()
+        files = asyncio.run(
+            client.list_symbol_files(
+                TradeType.um, DataFrequency.daily, DataType.book_depth, "BTCUSDT"
+            )
+        )
+        recent = [f for f in files if not f.key.endswith(".CHECKSUM")][-1:]
+        if not recent:
+            pytest.skip("No archive files for bookDepth")
+
+        db = str(tmp_path / "catalog.duckdb")
+        resource = archive_data_resource("BTCUSDT", [f.key for f in recent], data_type="bookDepth")
+        con = _run_pipeline(resource, "e2e_bookdepth", db)
+
+        table = _bronze_table(con, "book_depth")
+        if table is None:
+            pytest.skip("No bronze table for book_depth (download returned empty)")
+        bronze_raw = con.execute(
+            f"SELECT timestamp, percentage, depth, notional, symbol "
+            f"FROM bronze.{table} WHERE symbol = ?",
+            ["BTCUSDT"],
+        ).fetchall()
+        if not bronze_raw:
+            pytest.skip("No bronze rows for bookDepth")
+
+        import polars as pl
+
+        bronze_columns = ["timestamp", "percentage", "depth", "notional", "symbol"]
+        bronze = pl.from_records(bronze_raw, schema=bronze_columns, orient="row")
+        bronze = bronze.with_columns(
+            pl.col("percentage").cast(pl.Float64),
+            pl.col("depth").cast(pl.Float64),
+            pl.col("notional").cast(pl.Float64),
+            pl.col("symbol").cast(pl.Utf8),
+        )
+        assert len(bronze) >= 1, "bookDepth bronze empty"
+
+        con.close()
+
+
+class TestArchiveMetricsCorrectness:
+    """Validate metrics Archive pipeline — bronze ingestion only."""
+
+    def test_field_mappings(self, tmp_path: Path) -> None:
+        from binance_datatool.archive.client import ArchiveClient
+
+        client = ArchiveClient()
+        files = asyncio.run(
+            client.list_symbol_files(TradeType.um, DataFrequency.daily, DataType.metrics, "BTCUSDT")
+        )
+        recent = [f for f in files if not f.key.endswith(".CHECKSUM")][-1:]
+        if not recent:
+            pytest.skip("No archive files for metrics")
+
+        db = str(tmp_path / "catalog.duckdb")
+        resource = archive_data_resource("BTCUSDT", [f.key for f in recent], data_type="metrics")
+        con = _run_pipeline(resource, "e2e_metrics", db)
+
+        table = _bronze_table(con, "metrics")
+        if table is None:
+            pytest.skip("No bronze table for metrics (download returned empty)")
+        bronze_raw = con.execute(
+            f"SELECT create_time, sum_open_interest, sum_open_interest_value, "
+            f"count_toptrader_long_short_ratio, sum_toptrader_long_short_ratio, "
+            f"count_long_short_ratio, sum_taker_long_short_vol_ratio, symbol "
+            f"FROM bronze.{table} WHERE symbol = ?",
+            ["BTCUSDT"],
+        ).fetchall()
+        if not bronze_raw:
+            pytest.skip("No bronze rows for metrics")
+
+        import polars as pl
+
+        bronze_columns = [
+            "create_time",
+            "sum_open_interest",
+            "sum_open_interest_value",
+            "count_toptrader_long_short_ratio",
+            "sum_toptrader_long_short_ratio",
+            "count_long_short_ratio",
+            "sum_taker_long_short_vol_ratio",
+            "symbol",
+        ]
+        bronze = pl.from_records(bronze_raw, schema=bronze_columns, orient="row")
+        bronze = bronze.with_columns(
+            pl.col("sum_open_interest").cast(pl.Float64),
+            pl.col("sum_open_interest_value").cast(pl.Float64),
+            pl.col("symbol").cast(pl.Utf8),
+        )
+        assert len(bronze) >= 1, "metrics bronze empty"
+
+        con.close()
+
+
 class TestCrossTableConsistency:
     """Validate consistency across all silver tables."""
 

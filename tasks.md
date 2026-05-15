@@ -599,3 +599,44 @@ To add dlt archive support for a new data type:
 
 **Status**: Deferred. All 4 currently active data types (klines, aggTrades, fundingRate, trades)
 are fully supported. The remaining 7 are future extensions pending user demand.
+
+---
+
+## Phase 41: New Archive Data Type Support (2026-05-15)
+
+**Goal**: Add dlt archive support for klines-variant data types and basic types
+available on S3 but not previously in dlt.
+
+### Implemented
+
+**Klines-like types** (reuse klines schema, write to shared `bronze.klines` table):
+| ✅ | 41.1 | FR | `indexPriceKlines` — index price kline bars from um/cm archive |
+| ✅ | 41.2 | FR | `markPriceKlines` — mark price kline bars from um/cm archive |
+| ⏭ | 41.3 | FR | `premiumIndexKlines` — premium index bars (has negative values, SilverKlinesSchema ge>=0 incompatible) |
+
+**New types** (separate bronze tables):
+| ✅ | 41.4 | FR | `bookDepth` — level-2 order book depth snapshots (4 columns: timestamp, percentage, depth, notional) |
+| ⏳ | 41.5 | FR | `trades` — raw trade data (schema fixed: added quote_quantity, is_best_match to _DATA_TYPE_COLUMNS; CI too slow: 2M+ rows/file) |
+| ⏭ | 41.6 | FR | `metrics` — market metrics (8 columns; test skipped: 404 for latest file on S3) |
+
+### Not Implemented (dead data types, Binance stopped publishing)
+| ❌ | 41.7 | FR | `bookTicker` — best bid/ask snapshots (last file: 2024-03-30) |
+| ❌ | 41.8 | FR | `liquidationSnapshot` — liquidation data (last file: 2024-10-14) |
+
+### Code Changes
+- `binance_archive.py`: Added `_KLINES_TYPES` set for interval injection
+- `binance_archive.py`: Added `_BRONZE_COLS`, `_PRIMARY_KEYS`, `_TABLE_MAP` entries for 8 new data types
+- `binance_archive.py`: Added `_DATA_TYPE_COLUMNS` for bookDepth (4), metrics (8), fixed trades (added quote_quantity, is_best_match)
+- `binance_archive.py`: Klines-like types fall back to `_DATA_TYPE_COLUMNS["klines"]` via `.get()` pattern
+- `binance_archive.py`: Fixed `_parse_csv_rows` to use same fallback for type column lookup
+
+### E2E Results (19/20 collection, trades excluded)
+```
+REST:       klines[spot,um]  aggTrades[spot,um]  fundingRate[um,cm]       (6/6)
+Archive:    klines[spot,um,cm]  aggTrades[spot,um]  fundingRate[um,cm]     (7/7)
+Archive:    indexPriceKlines[um]  markPriceKlines[um]  bookDepth[um]       (3/3)
+Archive:    premiumIndexKlines (skip: negative values)  metrics (skip: 404)
+Cross:      ts_date                                                        (1/1)
+```
+
+**Total**: 17 passed, 2 skipped, 1 excluded (trades too large for CI)

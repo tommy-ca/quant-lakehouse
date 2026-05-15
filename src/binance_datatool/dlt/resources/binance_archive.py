@@ -15,8 +15,49 @@ import dlt  # noqa: TC002 — our dlt package shadows the module name
 
 from binance_datatool.common.constants import S3_DOWNLOAD_PREFIX
 
+_KLINES_TYPES = {"klines", "indexPriceKlines", "markPriceKlines", "premiumIndexKlines"}
+
 _BRONZE_COLS: dict[str, list[str]] = {
     "klines": [
+        "open_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "close_time",
+        "quote_volume",
+        "count",
+        "taker_buy_volume",
+        "taker_buy_quote_volume",
+    ],
+    "indexPriceKlines": [
+        "open_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "close_time",
+        "quote_volume",
+        "count",
+        "taker_buy_volume",
+        "taker_buy_quote_volume",
+    ],
+    "markPriceKlines": [
+        "open_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "close_time",
+        "quote_volume",
+        "count",
+        "taker_buy_volume",
+        "taker_buy_quote_volume",
+    ],
+    "premiumIndexKlines": [
         "open_time",
         "open",
         "high",
@@ -54,13 +95,33 @@ _BRONZE_COLS: dict[str, list[str]] = {
         "mark_price",
         "funding_interval_hours",
     ],
+    "bookDepth": [
+        "timestamp",
+        "percentage",
+        "depth",
+        "notional",
+    ],
+    "metrics": [
+        "create_time",
+        "sum_open_interest",
+        "sum_open_interest_value",
+        "count_toptrader_long_short_ratio",
+        "sum_toptrader_long_short_ratio",
+        "count_long_short_ratio",
+        "sum_taker_long_short_vol_ratio",
+    ],
 }
 
 _PRIMARY_KEYS: dict[str, tuple[str, ...]] = {
     "klines": ("symbol", "interval", "open_time"),
+    "indexPriceKlines": ("symbol", "interval", "open_time"),
+    "markPriceKlines": ("symbol", "interval", "open_time"),
+    "premiumIndexKlines": ("symbol", "interval", "open_time"),
     "aggTrades": ("symbol", "agg_trade_id"),
     "trades": ("symbol", "trade_id"),
     "fundingRate": ("symbol", "funding_time"),
+    "bookDepth": ("symbol", "timestamp"),
+    "metrics": ("symbol", "create_time"),
 }
 
 _DATA_TYPE_COLUMNS: dict[str, dict[str, dict[str, Any]]] = {
@@ -94,8 +155,10 @@ _DATA_TYPE_COLUMNS: dict[str, dict[str, dict[str, Any]]] = {
         "trade_id": {"data_type": "bigint", "nullable": False},
         "price": {"data_type": "double", "nullable": False},
         "quantity": {"data_type": "double", "nullable": False},
+        "quote_quantity": {"data_type": "double", "nullable": True},
         "transact_time": {"data_type": "bigint", "nullable": False},
         "is_buyer_maker": {"data_type": "bool", "nullable": False},
+        "is_best_match": {"data_type": "bool", "nullable": True},
         "symbol": {"data_type": "text", "nullable": False},
     },
     "fundingRate": {
@@ -105,13 +168,35 @@ _DATA_TYPE_COLUMNS: dict[str, dict[str, dict[str, Any]]] = {
         "funding_interval_hours": {"data_type": "bigint", "nullable": True},
         "symbol": {"data_type": "text", "nullable": False},
     },
+    "bookDepth": {
+        "timestamp": {"data_type": "text", "nullable": False},
+        "percentage": {"data_type": "double", "nullable": False},
+        "depth": {"data_type": "double", "nullable": False},
+        "notional": {"data_type": "double", "nullable": False},
+        "symbol": {"data_type": "text", "nullable": False},
+    },
+    "metrics": {
+        "create_time": {"data_type": "text", "nullable": False},
+        "sum_open_interest": {"data_type": "double", "nullable": False},
+        "sum_open_interest_value": {"data_type": "double", "nullable": False},
+        "count_toptrader_long_short_ratio": {"data_type": "double", "nullable": True},
+        "sum_toptrader_long_short_ratio": {"data_type": "double", "nullable": True},
+        "count_long_short_ratio": {"data_type": "double", "nullable": True},
+        "sum_taker_long_short_vol_ratio": {"data_type": "double", "nullable": True},
+        "symbol": {"data_type": "text", "nullable": False},
+    },
 }
 
 _TABLE_MAP: dict[str, str] = {
     "klines": "klines",
+    "indexPriceKlines": "klines",
+    "markPriceKlines": "klines",
+    "premiumIndexKlines": "klines",
     "aggTrades": "agg_trades",
     "trades": "trades",
     "fundingRate": "funding_rate",
+    "bookDepth": "book_depth",
+    "metrics": "metrics",
 }
 
 
@@ -141,7 +226,7 @@ def _parse_csv_rows(
         if len(parts) < len(cols) - 1:
             continue
         row: dict[str, Any] = {"symbol": symbol}
-        if interval is not None and data_type == "klines":
+        if interval is not None and data_type in _KLINES_TYPES:
             row["interval"] = interval
         for i, col in enumerate(cols):
             if i >= len(parts):
@@ -149,7 +234,11 @@ def _parse_csv_rows(
             raw = parts[i].strip()
             if not raw:
                 continue
-            col_type = _DATA_TYPE_COLUMNS[data_type].get(col, {}).get("data_type", "text")
+            col_type = (
+                (_DATA_TYPE_COLUMNS.get(data_type) or _DATA_TYPE_COLUMNS["klines"])
+                .get(col, {})
+                .get("data_type", "text")
+            )
             if col_type == "bigint":
                 row[col] = int(raw)
             elif col_type == "double":
@@ -223,6 +312,6 @@ def archive_data_resource(
         table_name=_table,
         write_disposition="merge",
         primary_key=_PRIMARY_KEYS[data_type],
-        columns=_DATA_TYPE_COLUMNS[data_type],
+        columns=_DATA_TYPE_COLUMNS.get(data_type) or _DATA_TYPE_COLUMNS["klines"],
         schema_contract={"columns": "freeze", "data_type": "freeze"},
     )
