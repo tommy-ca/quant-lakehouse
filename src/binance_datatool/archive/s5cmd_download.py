@@ -148,12 +148,21 @@ def download_and_parse(
     Returns:
         List of parsed row lists, one per downloaded file.
     """
+    import shutil as _shutil
+
     from binance_datatool.dlt.resources.binance_archive import _parse_csv_rows
 
     local_paths = download_files(s3_keys, concurrency=concurrency)
-    results: list[list[dict[str, object]]] = []
-    for _csv_name, text in read_zips(local_paths):
-        rows = _parse_csv_rows(text, data_type, symbol, interval)
-        if rows:
-            results.append(rows)
-    return results
+    if not local_paths:
+        return []
+
+    tmpdir = local_paths[0].parent
+    try:
+        results: list[list[dict[str, object]]] = []
+        for _csv_name, text in read_zips(local_paths):
+            rows = _parse_csv_rows(text, data_type, symbol, interval)
+            if rows:
+                results.append(rows)
+        return results
+    finally:
+        _shutil.rmtree(tmpdir, ignore_errors=True)
