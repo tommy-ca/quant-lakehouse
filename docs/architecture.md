@@ -226,17 +226,30 @@ the complete field-to-source mapping matrix.
 | **REST API** | api.binance.com via SDK | real-time | `gap-fill`, `refresh-metadata` |
 | **WS Stream** | stream.binance.com via SDK | real-time continuous | `stream` (Phase 8) |
 
+### Data Type Classification
+
+Data types follow a two-tier model aligned with market data conventions:
+
+| Tier | Types | Rationale |
+|------|-------|-----------|
+| **Essential base** | klines, aggTrades, trades, fundingRate | Raw/primary market data served directly by Binance. Full Silver pipeline with Pandera validation. E2E validated for all 3 markets. |
+| **Optional derived** | bookDepth, metrics, indexPriceKlines, markPriceKlines, premiumIndexKlines | Derived, aggregated, or specialized data. Bronze-only ingestion (no Silver transform). Available via dlt archive but not required for core pipeline. |
+
 ### Data Type Coverage
 
-| Type | Archive | REST API | WS Stream | Silver Table | E2E Validated |
-|------|---------|----------|-----------|-------------|---------------|
-| klines (spot) | ✓ daily zips | ✓ | ✓ | `silver.klines` (19 cols) | ✅ |
-| klines (um) | ✓ daily zips | ✓ | ✓ | `silver.klines` (19 cols) | ✅ |
-| klines (cm) | ✓ daily zips | ✓ | ✓ | `silver.klines` (19 cols) | ✅ |
-| aggTrades (spot) | ✓ daily zips | ✓ | — | `silver.agg_trades` (18 cols) | ✅ |
-| aggTrades (um) | ✓ daily zips | ✓ | — | `silver.agg_trades` (18 cols) | ✅ |
-| fundingRate (um) | ✓ monthly zips | ✓ | — | `silver.funding_rate` (12 cols) | ✅ |
-| fundingRate (cm) | ✓ monthly zips | ✓ | — | `silver.funding_rate` (12 cols) | ✅ |
+| Type | Tier | Archive | REST | WS | Silver Table | E2E |
+|------|------|---------|------|-----|-------------|-----|
+| klines (spot/um/cm) | **Base** | ✓ | ✓ | ✓ | `silver.klines` (19 cols) | ✅ |
+| aggTrades (spot/um) | **Base** | ✓ | ✓ | — | `silver.agg_trades` (18 cols) | ✅ |
+| fundingRate (um/cm) | **Base** | ✓ | ✓ | — | `silver.funding_rate` (12 cols) | ✅ |
+| trades (spot/um/cm) | **Base** | ✓ | — | — | `bronze.trades` | ⏳ |
+| bookDepth (um/cm) | Derived | ✓ | — | — | `bronze.book_depth` | ✅ |
+| metrics (um/cm) | Derived | ✓ | — | — | `bronze.metrics` | ✅ |
+| indexPriceKlines (um/cm) | Derived | ✓ | — | — | `silver.klines` | ✅ |
+| markPriceKlines (um/cm) | Derived | ✓ | — | — | `silver.klines` | ✅ |
+| premiumIndexKlines (um/cm) | Derived | ✓ | — | — | `silver.klines` | ⏭ |
+| bookTicker | Dead | ✗ | ✗ | ✗ | — | ❌ |
+| liquidationSnapshot | Dead | ✗ | ✗ | ✗ | — | ❌ |
 
 ### Known Issues
 
