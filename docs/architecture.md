@@ -21,13 +21,15 @@ src/binance_datatool/
 │   ├── models.py            # 8 Pydantic models (Kline, AggTrade, FundingRate, Venue, SymbolMeta, Raw*)
 │   ├── destinations.py      # DuckDB/DuckLake destination builders (build_pipeline, run_source)
 │   ├── sources.py           # @dlt.source builders (build_binance_source, build_rest_source, build_ws_source)
-│   └── resources/           # 5 @dlt.resource modules + shared client factory
+│   └── resources/           # 8 @dlt.resource modules + shared client factory
 │       ├── _client.py       # Shared client_for() — DRY trade-type dispatch
 │       ├── binance_klines.py
 │       ├── binance_agg_trades.py
 │       ├── binance_funding.py
-│       ├── binance_archive.py
-│       └── binance_ws.py
+│       ├── binance_archive.py  # All data types: klines, aggTrades, trades, fundingRate, bookDepth, metrics, index/mark/premium klines
+│       ├── binance_ws.py
+│       ├── binance_metadata.py  # Venue + symbol metadata
+│       └── archive_index.py     # Local archive file index scanner
 ├── dlt_sources/             # Legacy forwarding modules — all real logic migrated to dlt/resources/
 │   ├── binance.py           # Forwarding → dlt.resources.binance_klines + dlt.sources
 │   ├── binance_rest.py      # Forwarding → dlt.resources (agg_trades, funding) + dlt.sources

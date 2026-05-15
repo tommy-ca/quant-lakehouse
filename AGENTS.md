@@ -356,15 +356,23 @@ the complete field-to-source mapping matrix.
 
 | Type | Archive | REST API | WS Stream | Sink/Transform | Silver Table | E2E Validated |
 |------|---------|----------|-----------|----------------|--------------|---------------|
-| klines (spot) | ✓ daily zips | ✓ via `build_binance_source` | ✓ via `ws_klines_resource` | ✓ `bronze_klines_to_silver` | `silver.klines` | ✅ REST (1000 rows) + Archive (1 file, μs detected) |
-| klines (um) | ✓ daily zips | ✓ via `build_binance_source` | ✓ via `ws_klines_resource` | ✓ `bronze_klines_to_silver` | `silver.klines` | ✅ REST (2000 rows) |
-| klines (cm) | ✓ daily zips | ✓ via `build_binance_source` | ✓ via `ws_klines_resource` | ✓ `bronze_klines_to_silver` | `silver.klines` | ⚠ (BTCUSD_PERP naming) |
-| aggTrades (spot) | ✓ daily zips | ✓ via `build_rest_source` | — | ✓ `bronze_agg_trades_to_silver` | `silver.agg_trades` | ✅ REST (500 rows) |
-| aggTrades (um) | ✓ daily zips | ✓ via `build_rest_source` | — | ✓ `bronze_agg_trades_to_silver` | `silver.agg_trades` | ✅ REST (1000 rows) |
-| fundingRate (um) | ✓ monthly zips | ✓ via `build_rest_source` | — | ✓ `bronze_funding_rate_to_silver` | `silver.funding_rate` | ✅ REST (100 rows) |
-| fundingRate (cm) | ✓ monthly zips | ✓ via `build_rest_source` | — | ✓ `bronze_funding_rate_to_silver` | `silver.funding_rate` | ✅ REST (100 rows) |
-| trades | ✓ daily zips | — | — | ✓ (legacy `sink.py`) | `silver.agg_trades` | ⏳ (no dlt source yet) |
-| bookDepth/... | empty dirs | ✗ | ✗ | ✗ | — | No data in archive |
+| klines (spot) | ✓ daily zips | ✓ via `build_binance_source` | ✓ via `ws_klines_resource` | ✓ `bronze_klines_to_silver` | `silver.klines` | ✅ REST + Archive |
+| klines (um) | ✓ daily zips | ✓ via `build_binance_source` | ✓ via `ws_klines_resource` | ✓ `bronze_klines_to_silver` | `silver.klines` | ✅ REST + Archive |
+| klines (cm) | ✓ daily zips | ✓ via `build_binance_source` | ✓ via `ws_klines_resource` | ✓ `bronze_klines_to_silver` | `silver.klines` | ✅ REST + Archive |
+| indexPriceKlines (um) | ✓ daily zips | — | — | ✓ klines transform | `silver.klines` | ✅ Archive |
+| markPriceKlines (um) | ✓ daily zips | — | — | ✓ klines transform | `silver.klines` | ✅ Archive |
+| premiumIndexKlines (um) | ✓ daily zips | — | — | ✓ klines transform* | `silver.klines` | ⏭ (negative values) |
+| aggTrades (spot) | ✓ daily zips | ✓ via `build_rest_source` | — | ✓ `bronze_agg_trades_to_silver` | `silver.agg_trades` | ✅ REST + Archive |
+| aggTrades (um) | ✓ daily zips | ✓ via `build_rest_source` | — | ✓ `bronze_agg_trades_to_silver` | `silver.agg_trades` | ✅ REST + Archive |
+| fundingRate (um) | ✓ monthly zips | ✓ via `build_rest_source` | — | ✓ `bronze_funding_rate_to_silver` | `silver.funding_rate` | ✅ REST + Archive |
+| fundingRate (cm) | ✓ monthly zips | ✓ via `build_rest_source` | — | ✓ `bronze_funding_rate_to_silver` | `silver.funding_rate` | ✅ REST + Archive |
+| trades | ✓ daily zips | — | — | ✓ bronze only | `bronze.trades` | ⏳ (2M+ rows/file) |
+| bookDepth (um) | ✓ daily zips | — | — | ✓ bronze only | `bronze.book_depth` | ✅ Archive |
+| bookDepth (cm) | ✓ daily zips | — | — | ✓ bronze only | `bronze.book_depth` | ⏳ |
+| metrics (um) | ✓ daily zips | — | — | ✓ bronze only | `bronze.metrics` | ✅ Archive |
+| metrics (cm) | ✓ daily zips | — | — | ✓ bronze only | `bronze.metrics` | ⏳ |
+| bookTicker | ❌ stopped 2024-03 | ✗ | ✗ | ✗ | — | Dead data |
+| liquidationSnapshot | ❌ stopped 2024-10 | ✗ | ✗ | ✗ | — | Dead data |
 
 ### Silver Schema Column Counts (validated)
 

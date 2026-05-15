@@ -103,6 +103,7 @@ _BRONZE_COLS: dict[str, list[str]] = {
     ],
     "metrics": [
         "create_time",
+        "symbol",
         "sum_open_interest",
         "sum_open_interest_value",
         "count_toptrader_long_short_ratio",

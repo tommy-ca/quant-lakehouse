@@ -1071,9 +1071,28 @@ markPriceKlines, premiumIndexKlines, metrics, liquidationSnapshot.
 Adding dlt support requires: `_BRONZE_COLS` + `_DATA_TYPE_COLUMNS` + `_TABLE_MAP` +
 Pandera schema + Polars transform + E2E test. Deferred pending demand.
 
+### Phase 41: New Archive Data Type Support (2026-05-15)
+
+**Goal**: Add dlt archive support for data types available on Binance S3 but previously
+not in the dlt pipeline.
+
+**Implemented (3 new bronze tables + 3 klines-variant types)**:
+- ✅ `indexPriceKlines` (um) — index price kline bars, reuses klines schema → `silver.klines`
+- ✅ `markPriceKlines` (um) — mark price kline bars, reuses klines schema → `silver.klines`
+- ⏭ `premiumIndexKlines` (um) — premium index bars (negative values incompatible with SilverKlinesSchema ge>=0)
+- ✅ `bookDepth` (um) — L2 order book depth snapshots → `bronze.book_depth` (4 columns)
+- ✅ `metrics` (um) — market metrics data → `bronze.metrics` (8 columns)
+- ⏳ `trades` (spot, um, cm) — raw trade data. Schema fixed (added quote_quantity, is_best_match). CI exclusion: 2M+ rows/file.
+
+**Not implemented** (Binance stopped publishing):
+- ❌ `bookTicker` — last file 2024-03-30
+- ❌ `liquidationSnapshot` — last file 2024-10-14
+
+**E2E Results**: 18/20 collection, 17 passed, 2 skipped (premiumIndexKlines negative values, trades too large)
+
 ---
 
-**Document Version**: 1.7
+**Document Version**: 1.8
 **Last Updated**: 2026-05-15
 **Maintainer**: Team
-**Status**: Production-stable. 14/14 E2E archive coverage for active data types. 7 deferred extensions.
+**Status**: Production-stable. 17/18 E2E for active data types. 3 deferred (trades, premiumIndexKlines, dead types).
