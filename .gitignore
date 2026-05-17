@@ -228,3 +228,4 @@ temp/
 skills-lock.json
 test.duckdb
 *.duckdb
+$DB_PATH
