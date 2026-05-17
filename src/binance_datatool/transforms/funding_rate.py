@@ -39,6 +39,13 @@ def bronze_funding_rate_to_silver(
     funding_time_col = pl.col("funding_time").cast(pl.Int64)
     is_us = funding_time_col >= 1_000_000_000_000_000
 
+    # Check if mark_price exists, otherwise provide default
+    mark_price_col = (
+        pl.col("mark_price").cast(pl.Utf8).str.replace(r"^\s*$", "0").cast(pl.Float64)
+        if "mark_price" in df.columns
+        else pl.lit(0.0, dtype=pl.Float64)
+    )
+
     result = df.with_columns(
         [
             pl.when(is_us)
@@ -47,11 +54,7 @@ def bronze_funding_rate_to_silver(
             .alias("ts_event"),
             pl.lit(now_us, dtype=pl.Int64).alias("ts_recv"),
             pl.col("funding_rate").cast(pl.Float64),
-            pl.col("mark_price")
-            .cast(pl.Utf8)
-            .str.replace(r"^\s*$", "0")
-            .cast(pl.Float64)
-            .alias("mark_price"),
+            mark_price_col.alias("mark_price"),
             pl.when(is_us)
             .then(funding_time_col)
             .otherwise(funding_time_col * 1000)

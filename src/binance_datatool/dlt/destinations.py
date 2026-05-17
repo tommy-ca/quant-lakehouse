@@ -9,8 +9,6 @@ DuckLake (default): lakehouse storage with catalog + filesystem.
 
 DuckDB (legacy): single-file database.
   Used when ``destination="duckdb"`` is explicitly requested.
-
-This is the canonical location. Previously at ``dlt_sources.pipeline``.
 """
 
 from __future__ import annotations
@@ -27,41 +25,24 @@ def build_pipeline(
     destination: str = "ducklake",
     lake_path: str | None = None,
 ) -> dlt.Pipeline:
-    """Build a dlt pipeline configured for DuckDB or DuckLake.
+    """Build a dlt pipeline configured for DuckLake with a DuckDB catalog."""
 
-    Args:
-        source_name: Unique pipeline name (e.g. ``"binance_spot"``).
-        catalog_path: Path to ``catalog.duckdb`` (DuckDB destination only).
-        dataset_name: dlt dataset schema name (default ``"bronze"``).
-        destination: ``"ducklake"`` (default) or ``"duckdb"``.
-        lake_path: Path to the lake directory (DuckLake storage + catalog).
-            Defaults to parent of ``catalog_path`` or ``./lake``.
+    # DuckLake: lakehouse with catalog + storage
+    _lp = lake_path or "./lake"
+    lp_abs = str(Path(_lp).resolve())
+    catalog_abs = str(Path(lp_abs) / "metadata.duckdb")
+    Path(lp_abs).mkdir(parents=True, exist_ok=True)
 
-    Returns:
-        Configured ``dlt.Pipeline``.
-    """
-    if destination == "duckdb":
-        if catalog_path:
-            Path(catalog_path).parent.mkdir(parents=True, exist_ok=True)
-        dest: str | dlt.Destination = (
-            dlt.destinations.duckdb(catalog_path) if catalog_path else "duckdb"
-        )
-    else:
-        # DuckLake: lakehouse with catalog + storage
-        _lp = lake_path or (str(Path(catalog_path).parent) if catalog_path else "./lake")
-        lp_abs = str(Path(_lp).resolve())
-
-        # DuckLake catalog is a sqlite file named metadata.ducklake by project convention
-        catalog_abs = str(Path(lp_abs) / "metadata.ducklake")
-        Path(lp_abs).mkdir(parents=True, exist_ok=True)
-
-        dest = dlt.destinations.ducklake(
-            credentials=dlt.destinations.impl.ducklake.configuration.DuckLakeCredentials(
-                ducklake_name=source_name.replace("-", "_"),
-                catalog=f"sqlite:///{catalog_abs}",
-                storage=f"file://{lp_abs}",
-            ),
-        )
+    dest = dlt.destinations.ducklake(
+        credentials=dlt.destinations.impl.ducklake.configuration.DuckLakeCredentials(
+            ducklake_name=source_name.replace("-", "_"),
+            catalog=f"duckdb:///{catalog_abs}",
+            storage=f"file://{lp_abs}",
+        ),
+        dataset_name=dataset_name,
+        local_dir=lp_abs,
+        override_data_path=True,
+    )
 
     return dlt.pipeline(
         pipeline_name=source_name,
@@ -80,19 +61,6 @@ def run_source(
     destination: str = "ducklake",
     lake_path: str | None = None,
 ) -> dict:
-    """Extract a dlt source to local storage without loading to the database.
-
-    Args:
-        source: A dlt source or resource.
-        source_name: Pipeline name.
-        catalog_path: Path to ``catalog.duckdb`` (DuckDB destination only).
-        dataset_name: dlt dataset schema name.
-        destination: ``"ducklake"`` (default) or ``"duckdb"``.
-        lake_path: DuckLake storage path (ignored for ``"duckdb"``).
-
-    Returns:
-        Dict with ``source_name``, ``dataset_name``, and ``tables_loaded``.
-    """
     pipeline = build_pipeline(source_name, catalog_path, dataset_name, destination, lake_path)
     extract_info = pipeline.extract(source)
     schema = pipeline.default_schema
@@ -114,18 +82,6 @@ def load_source(
     destination: str = "ducklake",
     lake_path: str | None = None,
 ) -> dict:
-    """Normalize and load previously extracted data into the destination.
-
-    Args:
-        source_name: Pipeline name.
-        catalog_path: Path to ``catalog.duckdb`` (DuckDB destination only).
-        dataset_name: dlt dataset schema name.
-        destination: ``"ducklake"`` (default) or ``"duckdb"``.
-        lake_path: DuckLake storage path (ignored for ``"duckdb"``).
-
-    Returns:
-        Dict with ``load_info``.
-    """
     pipeline = build_pipeline(source_name, catalog_path, dataset_name, destination, lake_path)
     pipeline.normalize()
     load_info = pipeline.load()

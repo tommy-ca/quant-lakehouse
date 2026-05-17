@@ -56,7 +56,7 @@ def build_binance_source(
 
     return [
         resource(symbol=sym, trade_type=trade_type, **kwargs)
-        .with_name(f"{sym}_{data_type}")
+        .with_name(table)
         .apply_hints(table_name=table)
         for sym in symbols
     ]
