@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import time
+import warnings
 import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -21,6 +22,10 @@ from loguru import logger
 from binance_datatool.common.enums import exchange_for
 from binance_datatool.storage.catalog import DuckLakeCatalog
 from binance_datatool.workflow.legacy.lineage import LineageEvent, LineageEventType
+
+# NOTE: This module imports small legacy Lineage* helpers. These are
+# intentionally retained as deprecated wrappers while the dlt+prefect pipeline
+# is validated. See tasks.md Phase 42 for the consolidation and removal plan.
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -477,15 +482,25 @@ def _parse_symbol_from_path(path: Path, known_symbols: Sequence[str]) -> str | N
 
 
 class SinkWorkflow:
-    """Transform Bronze archive data to Silver layer (Parquet/DuckDB)."""
+    """Legacy sink workflow. Use dlt + Polars transforms instead.
+
+    .. deprecated:: 0.1.1
+       Use ``binance_datatool.workflow.prefect_tasks.transform`` instead.
+    """
 
     def __init__(
         self,
-        archive_home: Path,
+        archive_home: str | Path,
         catalog_path: Path | None = None,
         duckdb_path: Path | None = None,
         tracker: LineageTracker | None = None,
     ) -> None:
+        warnings.warn(
+            "SinkWorkflow is deprecated and will be removed in a future version. "
+            "Use dlt + Polars transforms instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._archive_home = Path(archive_home)
         self._catalog_path = catalog_path or Path(_DEFAULT_CATALOG_PATH)
         self._duckdb_path = duckdb_path

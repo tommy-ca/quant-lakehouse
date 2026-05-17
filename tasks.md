@@ -600,6 +600,22 @@ To add dlt archive support for a new data type:
 **Status**: Deferred. All 4 currently active data types (klines, aggTrades, fundingRate, trades)
 are fully supported. The remaining 7 are future extensions pending user demand.
 
+## Phase 42: Legacy Code Path Consolidation (2026-05-16)
+
+| Status | ID | Type | Description |
+|--------|----|------|-------------|
+| ✅ | 42.1 | C | Implemented minimal `DataSourceAdapter` protocol + `BinanceAdapter`; marked modules importing `workflow/legacy` with deprecation notes. |
+| ✅ | 42.2 | D | Update AGENTS.md and docs to clearly call out remaining legacy fallbacks and a removal timeline (2 weeks after 0-production-usage confirmation). |
+| ✅ | 42.4 | D | Swept docs (implementation-guide updated with adapter re-introduction note + registry wiring status; data-flows, audit, requirements already had notes). |
+| ✅ | 42.5 | C | Replaced safe direct ArchiveClient instantiations in CLI with adapter registry usage (`_refresh_and_query` now uses `registry.get("binance")`). |
+| ✅ | 42.3 | C | Replaced inline comments `# legacy` with `@deprecated` notes in code where appropriate and added pointers to new modules (dlt, prefect_tasks, adapter). |
+| ✅ | 42.6 | T | Added `tests/test_no_unapproved_legacy_imports.py` guard test and wired it into pre-commit. |
+| ✅ | 42.7 | A | Audited Pydantic models (`dlt/models.py`) vs Pandera schemas (`validation/schemas.py`) for alignment — constraints consistent (high>=low, ge>=0, positive timestamps). All silver schemas use `pl.Date` for `ts_date`. Added `TestAggTradesSilverSchema`, `TestFundingRateSilverSchema`, `TestValidationConsistency` to `tests/test_validation.py`. Updated AGENTS.md validation layer table and `extending.md` Pandera section. |
+| ✅ | 42.8 | D | Finalize remaining docs sweeps (schema-matrix, silver-layer-spec if needed). |
+| ✅ | 42.9 | T | E2E data pipeline validation: all 14 integration tests pass (klines × 3 markets, aggTrades × 2 markets, fundingRate × 2 markets, indexKlines × 2 types, bookDepth, metrics, cross-table consistency). 1 skipped (premiumIndexKlines: negative values not supported by SilverKlinesSchema ge>=0). 281 unit tests pass, 8 skipped. Lint clean. |
+
+Notes: The adapter protocol implementation lives in `src/binance_datatool/adapter`. The small set of legacy imports (prefect_flows.py, sink.py, gap_fill.py, cli/archive.py) have been annotated with deprecation notes. The removal plan remains: monitor for 2 weeks of zero production usage or explicit `remove-legacy` milestone before deletion.
+
 ---
 
 ## Phase 41: New Archive Data Type Support (2026-05-15)

@@ -150,16 +150,19 @@ DBN uses fixed-point i64 for prices (1e-9 precision) — more precise but less i
 
 ## 7. Schema Coverage by Data Type
 
-| Data Type | Binance Archive | Binance REST/WS | tardis.dev | DBN |
-|---|---|---|---|---|
-| klines (OHLCV) | ✅ daily CSV | ✅ `klines()` | ❌ (tick-level only) | ✅ `OhlcvMsg` |
-| aggTrades | ✅ daily CSV | ✅ `agg_trades()` | ✅ `trades` CSV | ✅ `TradeMsg` (MBP_0) |
-| trades | ✅ daily CSV | ✅ `historical_trades()` | ✅ `trades` CSV | ✅ `TradeMsg` |
-| fundingRate | ✅ monthly CSV | ✅ `get_funding_rate_history()` | ✅ `derivative_ticker` CSV | ❌ (via `StatMsg`) |
-| bookDepth | ✅ daily CSV | ❌ (WS only) | ✅ `incremental_book_L2` CSV | ✅ `MbpMsg` |
-| bookTicker | ✅ daily CSV | ❌ (WS only) | ✅ `book_ticker` CSV | ✅ `BboMsg` |
-| indexPriceKlines | ✅ daily CSV | ✅ `index_price_klines()` | ❌ | ❌ |
-| markPriceKlines | ✅ daily CSV | ✅ `mark_price_klines()` | ❌ | ❌ |
+| Data Type | Binance Archive | Binance REST/WS | tardis.dev | DBN | Notes |
+|---|---|---|---|---|---|
+| klines (OHLCV) | ✅ daily CSV | ✅ `klines()` | ❌ (tick-level only) | ✅ `OhlcvMsg` | |
+| aggTrades | ✅ daily CSV | ✅ `agg_trades()` | ✅ `trades` CSV | ✅ `TradeMsg` (MBP_0) | |
+| trades | ✅ daily CSV | ✅ `historical_trades()` | ✅ `trades` CSV | ✅ `TradeMsg` | |
+| fundingRate | ✅ monthly CSV | ✅ `get_funding_rate_history()` | ✅ `derivative_ticker` CSV | ❌ | |
+| bookDepth | ✅ daily CSV | ❌ (WS only) | ✅ `incremental_book_L2` CSV | ✅ `MbpMsg` | Bronze only |
+| bookTicker | ✅ (last 2024-03-30) | ❌ (dead) | ✅ `book_ticker` CSV | ✅ `BboMsg` | ❌ Dead data |
+| liquidationSnapshot | ✅ (last 2024-10-14) | ❌ (dead) | ✅ `liquidation` CSV | ✅ | ❌ Dead data |
+| indexPriceKlines | ✅ daily CSV | ✅ `index_price_klines()` | ❌ | ❌ | |
+| markPriceKlines | ✅ daily CSV | ✅ `mark_price_klines()` | ❌ | ❌ | |
+| premiumIndexKlines | ✅ daily CSV | ❌ | ❌ | ❌ | ⚠️ negative values; SilverKlinesSchema `ge>=0` incompatible |
+| metrics | ✅ daily CSV | ❌ | ❌ | ❌ | Bronze only; test skipped (404 on latest) |
 
 ---
 

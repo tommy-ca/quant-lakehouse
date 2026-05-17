@@ -1,12 +1,17 @@
 # Implementation Guide
 
-> **Note (2026-05-14):** This guide was written for the original adapter-based
+> **Note (2026-05-16):** This guide was written for an earlier adapter-based
 > architecture. The `adapter/` package, `datacontract.py`, and `source_registry.py`
-> have been removed (YAGNI cleanup — Phase 35). Code examples referencing these
-> modules are historical.
+> were removed (Phase 35 YAGNI cleanup) and **re-introduced** (Phase 42) as a
+> minimal package under `src/binance_datatool/adapter/` containing:
+> - `DataSourceAdapter` protocol (`protocol.py`)
+> - `BinanceAdapter` wrapping `ArchiveClient` (`binance.py`)
+> - `SourceRegistry` singleton (`registry.py`)
 >
-> For current extension guidance, see `extending.md` which covers dlt resources,
-> Polars transforms, Pandera schemas, and Prefect tasks.
+> The adapter is intentionally tiny — workflows accept the `DataSourceAdapter`
+> protocol rather than concrete clients (SOLID: Dependency Inversion). The CLI
+> `list-symbols` command is wired to the registry as an opt-in path
+> (`--source adapter`). See `docs/extending.md` for current extension guidance.
 
 This document guides developers through implementing the specifications and building out binance-datatool into a scalable, multi-source data pipeline framework.
 
@@ -27,7 +32,7 @@ This document guides developers through implementing the specifications and buil
 - [x] Implement BinanceAdapter wrapping ArchiveClient
 - [ ] CoinbaseAdapter (skeleton) — not implemented, deferred
 - [x] Write adapter integration tests (25 tests in test_adapter_binance.py)
-- [ ] Integrate SourceRegistry with CLI (--source flag not yet wired)
+- [x] Integrate SourceRegistry with CLI (list-symbols wired with `--source adapter` opt-in; other commands to follow)
 
 ### ✅ Phase 3: Data Contracts & Validation (COMPLETE)
 - [x] Implement DataContract class

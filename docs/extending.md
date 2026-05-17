@@ -205,13 +205,24 @@ See `workflow/prefect_tasks/extract.py` → `run_dlt_pipeline()` for a real exam
 
 ## Adding a New Pandera Schema
 
+The validation layer has two enforcement points (see AGENTS.md for the full table):
+
+1. **dlt Pydantic models** (`dlt/models.py`) — per-record validation at ingest.
+   Used as `columns=RawKlineModel` in `@dlt.resource` decorators.
+2. **Pandera schemas** (`validation/schemas.py`) — per-DataFrame validation at
+   the Polars transform boundary. Wire via `validate_silver_*()` helpers.
+
+To add a new Pandera schema:
+
 1. Add the schema class to `validation/schemas.py` using `pa.DataFrameModel`.
 2. Add a `validate_*()` helper function that wraps `Schema.validate(df, lazy=True)`.
 3. Wire the helper into the transform function for that data type.
-4. Ensure `ts_date` uses `pl.Date = pa.Field(nullable=False)`.
+4. Ensure `ts_date` uses `pl.Date = pa.Field(nullable=False)` (not `object`).
+5. For cross-column checks (e.g. `high >= low`), add a helper using
+   `check_high_gte_low()` and call it in the validate function.
 
-See `BronzeKlinesSchema`, `SilverKlinesSchema`, and `validate_silver_klines()` for
-real examples.
+See `BronzeKlinesSchema`, `SilverKlinesSchema`, `validate_silver_klines()`,
+and `check_high_gte_low()` for real examples.
 
 ## Adding a New SQLMesh Model
 

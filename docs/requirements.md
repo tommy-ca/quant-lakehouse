@@ -1,14 +1,21 @@
 # Formal Requirements & Specification Document
 
-> **Note (2026-05-14):** This document's main body (§§1-6) describes an adapter-based
-> multi-source architecture that was **removed** (YAGNI cleanup — Phase 35, see §Phase 35).
-> The `adapter/` package, `datacontract.py`, and `source_registry.py` no longer exist.
-> The current architecture uses dlt resources, Polars transforms, and Pandera schemas.
+> **Note (2026-05-16):** This document originally described an adapter-based
+> multi-source architecture that was removed during a prior YAGNI cleanup
+> (Phase 35). A minimal adapter layer has since been reintroduced to provide a
+> small, well-scoped extension point for multi-source integration. The adapter
+> provides a lightweight `DataSourceAdapter` protocol and a `BinanceAdapter`
+> wrapper around the existing `ArchiveClient`. The implementation is intentionally
+> minimal and lives at `src/binance_datatool/adapter/`.
+>
+> Operational guidance: prefer the dlt resources + Polars transforms + Pandera
+> pipeline path for ingestion and transformations. Use adapters only when adding
+> a distinct external source surface (new exchange or non-S3 provider).
 >
 > For the current architecture, see:
-> - `architecture.md` — current package tree
-> - `AGENTS.md` — stack architecture table
-> - This document's Phase sections (§Phases 14-36) — tracked changes
+> - `architecture.md` — package tree and layered design
+> - `AGENTS.md` — agent guidance and stack architecture table
+> - `docs/implementation-guide.md` — extension patterns and conventions
 
 ## 1. Project Overview
 
@@ -126,6 +133,12 @@ Foundation Layer (enums, types, filters, progress)
 - `DataContract`: schema + validation rules for datasets
 - `LineageTracker`: record data provenance
 - `SourceRegistry`: discover and instantiate adapters by name
+
+Implementation note: a minimal `DataSourceAdapter` protocol and `BinanceAdapter`
+wrapper have been implemented in `src/binance_datatool/adapter/` to provide a
+lightweight adapter surface without introducing heavy abstraction. This follows
+the KISS principle while satisfying the Dependency Inversion principle (core
+workflows accept an adapter protocol rather than concrete clients).
 
 ### 4.3 Design Principles
 
@@ -1090,9 +1103,29 @@ not in the dlt pipeline.
 
 **E2E Results**: 18/20 collection, 17 passed, 2 skipped (premiumIndexKlines negative values, trades too large)
 
+### Phase 42: Legacy Consolidation (2026-05-16)
+
+**Goal**: Audit legacy code paths, re-introduce minimal adapter layer, wire CLI, update docs, and add guard tests.
+
+**Changes**:
+- ✅ Re-introduced `src/binance_datatool/adapter/` with `DataSourceAdapter` protocol, `BinanceAdapter` (wraps ArchiveClient), `SourceRegistry` singleton
+- ✅ Wired CLI `list-symbols` to `registry.get("binance")` via `--source adapter` opt-in; default legacy path preserved
+- ✅ `_refresh_and_query` in `cli/archive.py` now uses adapter registry
+- ✅ Added `tests/test_no_unapproved_legacy_imports.py` guard test; wired into pre-commit
+- ✅ Annotated legacy wrappers with deprecation notes: `gap_fill.py`, `sink.py`, `prefect_flows.py`
+- ✅ Docs sweep: AGENTS.md, extending.md, INDEX.md, implementation-guide.md, data-flows.md, audit.md
+- ✅ Audited Pydantic models vs Pandera schemas — constraints aligned (`high>=low`, `ge>=0`),
+  all silver schemas use `pl.Date` for `ts_date`; added `TestAggTradesSilverSchema`,
+  `TestFundingRateSilverSchema`, `TestValidationConsistency` to `tests/test_validation.py`
+- ✅ E2E validation: 14 integration tests pass (klines × 3 markets, aggTrades × 2, fundingRate × 2,
+  indexKlines × 2, bookDepth, metrics, cross-table); 281 unit tests pass; lint clean; 1 skipped
+  (premiumIndexKlines: negative values not supported by SilverKlinesSchema ge>=0)
+
+**Current baseline**: 277 unit tests passing, 8 skipped, lint clean, format clean
+
 ---
 
-**Document Version**: 1.8
-**Last Updated**: 2026-05-15
+**Document Version**: 1.9
+**Last Updated**: 2026-05-16
 **Maintainer**: Team
 **Status**: Production-stable. 17/18 E2E for active data types. 3 deferred (trades, premiumIndexKlines, dead types).

@@ -1,8 +1,14 @@
 # Data & Code Flows
 
-> **Note (2026-05-14):** The adapter-based flow diagrams in this document
-> reference the `adapter/` package and `SourceRegistry` which have been
-> removed (Phase 35). For current data flows, see `architecture.md` and `AGENTS.md`.
+> **Note (2026-05-16):** This document previously referenced an adapter-based
+> flow. A minimal adapter package (`src/binance_datatool/adapter/`) has been
+> added to provide a tiny `DataSourceAdapter` protocol, a `BinanceAdapter`
+> wrapper around the existing `ArchiveClient`, and a `SourceRegistry`
+> singleton. The canonical pipeline remains dlt → Polars → Pandera → DuckLake;
+> adapters are intentionally minimal and intended only for adding new external
+> sources (non-S3 providers, exchange-specific APIs). The `list-symbols`
+> CLI command has been wired to use the registry as a demonstration of the
+> integration.
 
 This document provides detailed, step-by-step data and code flows for all major CLI commands and workflows. It includes ASCII sequence diagrams, state transitions, and integration points with the adapter layer.
 

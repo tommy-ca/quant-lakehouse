@@ -162,3 +162,13 @@ Settings via environment variables or `.env`:
 - **Stdin composition** — `list-symbols | download` when no positional args given.
 - **Workflows prefer Python API** — flows accept same params as CLI but add parallelism.
 - **Serve deployments** — `uv run python -m binance_datatool.workflow.prefect_flows serve` for cron.
+
+## Agent Usage
+
+- Use this skill for tasks that are about managing the archive lifecycle: listing symbols, listing files, downloading archives, verifying checksums, running Prefect flows for backfills, and transforming archive data to Silver.
+- Do not use this skill to interact with live WebSocket streams or to perform ad-hoc REST trading actions. The skill is read-only for archive data and orchestrates controlled pipeline flows.
+- Prefer the Python API (`workflow.prefect_flows`) for complex multi-symbol or programmatic runs; prefer CLI for ad-hoc operator tasks.
+
+Limitations:
+- The archive listing path performs a live S3 listing if `--from-catalog` is not used; this can be slow for full-symbol scans. Prefer `--from-catalog` when available.
+- Some legacy fallback codepaths remain (small set of deprecated wrappers). See `AGENTS.md` and `tasks.md` Phase 42 for removal timeline and status.

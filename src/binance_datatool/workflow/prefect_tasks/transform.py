@@ -7,7 +7,10 @@ Prefect ``@task`` decorators in ``prefect_flows.py`` delegate to these.
 from __future__ import annotations
 
 from binance_datatool.storage.duckdb import get_connection, write_silver_table
-from binance_datatool.transforms.agg_trades import bronze_agg_trades_to_silver
+from binance_datatool.transforms.agg_trades import (
+    bronze_agg_trades_to_silver,
+    bronze_trades_to_silver,
+)
 from binance_datatool.transforms.funding_rate import bronze_funding_rate_to_silver
 from binance_datatool.transforms.klines import bronze_klines_to_silver
 
@@ -35,6 +38,30 @@ def transform_klines(
         if silver.is_empty():
             return 0
         return write_silver_table(con, "klines", silver.to_arrow(), symbol)
+    finally:
+        con.close()
+
+
+def transform_trades(
+    symbol: str,
+    trade_type: str = "spot",
+    catalog_path: str | None = None,
+) -> int:
+    """Read bronze trades from DuckDB, transform to Silver, write back."""
+    con = get_connection(catalog_path=catalog_path)
+    try:
+        # Input columns: trade_id, price, qty, quote_qty, time, is_buyer_maker, is_best_match
+        bronze = con.execute(
+            "SELECT trade_id, price, qty, quote_qty, time, is_buyer_maker, "
+            "is_best_match, symbol FROM bronze.trades WHERE symbol = ?",
+            [symbol],
+        ).pl()
+        if bronze.is_empty():
+            return 0
+        silver = bronze_trades_to_silver(bronze, symbol=symbol, trade_type=trade_type)
+        if silver.is_empty():
+            return 0
+        return write_silver_table(con, "agg_trades", silver.to_arrow(), symbol)
     finally:
         con.close()
 

@@ -1,14 +1,17 @@
 # Documentation Index & Project Status
 
-> **Note (2026-05-14):** This document describes the project as originally designed.
-> Several referenced modules have been removed (YAGNI cleanup — Phase 35):
-> `adapter/` (BinanceAdapter, SourceRegistry), `datacontract.py` (DataContract,
-> ContractRegistry), `source_registry.py`, `validation/models.py`.
+> **Note (2026-05-16):** Several components were removed during Phase 35
+> (YAGNI cleanup): `datacontract.py`, `validation/models.py`, `IcebergCatalog`,
+> analytics views. The `adapter/` package was removed in Phase 35 and
+> **re-introduced in Phase 42** as a minimal package
+> (`src/binance_datatool/adapter/`) with `DataSourceAdapter` protocol,
+> `BinanceAdapter`, and `SourceRegistry`. The `src/binance_datatool/skills/`
+> directory does not exist (skills not implemented).
 >
 > For the **current** architecture, see:
 > - `architecture.md` — current package tree and layer design
-> - `requirements.md` (§Phases 33-36) — recent changes and cleanup
-> - `AGENTS.md` — stack architecture table and working model
+> - `requirements.md` (§Phase 42) — recent adapter re-introduction
+> - `AGENTS.md` — stack architecture table, validation layer, and working model
 
 ## Overview
 
@@ -65,20 +68,17 @@ This index provides a complete picture of the binance-datatool project after com
      - verify-partition (hash and verify files)
      - validate-contract (schema validation + lineage)
 
-### 6. **implementation-guide.md** ⭐ UPDATED
-   - **Purpose**: Roadmap for implementing specifications
-   - **Covers**: 5 implementation phases, TDD approach, code examples, checklists
-   - **Length**: ~400 lines
-   - **Current Phase**: Phase 4 Complete (Lineage & Observability)
-   - **Completed**:
-     - ✅ Phase 2: Adapter Pattern (BinanceAdapter, SourceRegistry)
-     - ✅ Phase 3: Data Contracts (datacontract.py, ContractRegistry)
-     - ✅ Phase 4: Lineage Tracking (lineage.py, LineageTracker)
-     - ✅ Phase 6: Exchange Clients (exchange/ module)
-   - **Next Steps**:
-     - 🔄 OKX/Bybit via CCXT (CCXTExchangeClient)
-     - ⏳ CLI integration with SourceRegistry (--source flag)
-     - ⏳ Skills/subagents implementation
+### 6. **AGENTS.md** ⭐ WORKING REFERENCE
+    - **Purpose**: Complete operational reference for the current codebase
+    - **Covers**: Stack architecture, CLI commands, Prefect flows, data flow
+      diagrams, validation layer (Pydantic + Pandera), Silver schemas,
+      E2E correctness tests, Phase 42 consolidation plan
+    - **Key Sections**:
+      - dlt + Polars + Pandera + DuckLake stack table
+      - Data type coverage matrix
+      - Silver schema column counts (19 klines, 18 aggTrades, 12 fundingRate)
+      - Validation layer: per-record (Pydantic) and per-DataFrame (Pandera)
+      - Prefect flow task graph
 
 ### 7. **audit.md**
    - **Purpose**: Findings from code review
@@ -92,65 +92,52 @@ This index provides a complete picture of the binance-datatool project after com
 
 ---
 
-## 🔧 Code & Implementation
+## 🔧 Code & Implementation (Current State)
 
-### DataContract (✅ IMPLEMENTED)
-- **File**: `src/binance_datatool/datacontract.py`
-- **Status**: Complete (24 tests, all passing)
-- **What It Does**: Schema validation, custom validators, nullability rules
-- **Example**:
-  ```python
-  contract = DataContract(
-      source=DataSource.BINANCE,
-      market_type=MarketType.SPOT,
-      data_type=DataType.KLINES,
-      schema={"open_time": int, "price": Decimal, "volume": Decimal},
-      key_cols=["open_time"],
-      validators=[lambda row: row["price"] > 0, ...]
-  )
-  result = contract.validate(data)
-  ```
-- **Tests**: `tests/test_datacontract.py` (24 tests)
+### Adapter Package (✅ PHASE 42)
+- **Directory**: `src/binance_datatool/adapter/`
+- **Files**: `protocol.py` (DataSourceAdapter), `binance.py` (BinanceAdapter),
+  `registry.py` (SourceRegistry), `__init__.py`
+- **Protocol**: `DataSourceAdapter` — 3 methods: `list_symbols`, `list_symbol_files`, `get_name`
+- **Purpose**: Thin adapter layer for multi-source support (SOLID: Dependency Inversion).
+  `BinanceAdapter` wraps `ArchiveClient` (DRY, no rewrite).
 
-### Adapter Pattern (🔄 IN PROGRESS)
-- **File**: `src/binance_datatool/adapter/`
-- **Status**: Protocol defined, awaiting implementations
-- **Protocol**: `DataSourceAdapter` (5 methods: list_symbols, list_files, fetch_file, parse_symbol, get_metadata)
-- **Implementations Needed**:
-  - BinanceAdapter (wrap ArchiveClient)
-  - CCXT unified API (okx, bybit, binance)
-  - DataSourceAdapter protocol
+### Validation Layer (✅ INTEGRATED)
+- **Pydantic** (`dlt/models.py`): 8 models for per-record validation at dlt ingest.
+  `RawKlineModel`, `RawAggTradeModel`, `RawFundingRateModel` (all VARCHAR for bronze).
+  `KlineModel`, `AggTradeModel`, `FundingRateModel`, `VenueModel`, `SymbolMetaModel`.
+- **Pandera** (`validation/schemas.py`): 6 schemas for per-DataFrame validation at
+  Polars transform boundary. `BronzeKlinesSchema`, `BronzeAggTradesSchema`,
+  `BronzeFundingRateSchema` (bronze); `SilverKlinesSchema`, `AggTradesSilverSchema`,
+  `FundingRateSilverSchema` (silver, with `ts_date: pl.Date`).
+- Cross-column checks (`high >= low`) enforced in both layers.
 
-### Skills (⏳ PLANNED)
-- **Directory**: `src/binance_datatool/skills/`
-- **Status**: Specifications written (skills-subagents.md)
-- **Implementation Order**: Phase 3
-- **5 Core Skills**:
-  - discover-symbols
-  - list-files
-  - download-partition
-  - verify-partition
-  - validate-contract
+### Not Implemented
+- `src/binance_datatool/datacontract.py` — **removed** (Phase 35 YAGNI)
+- `src/binance_datatool/skills/` — **not implemented** (no skills/ directory)
+- `IcebergCatalog` — **removed** (Phase 36 YAGNI); DuckLake is primary storage
+- Analytics views (`daily_ohlcv`, `latest_klines`, `stale_symbols`) — **removed**
 
 ---
 
 ## 📊 Project Status Matrix
 
-| Component | Status | File | Tests | Notes |
-|-----------|--------|------|-------|-------|
-| **DataContract** | ✅ Complete | datacontract.py | 24 passing | Schema validation + validators |
-| **LineageTracker** | ✅ Complete | lineage.py | 24 passing | Data provenance tracking |
-| **BinanceAdapter** | ✅ Complete | adapter/binance.py | 35 passing | Wraps ArchiveClient |
-| **SourceRegistry** | ✅ Complete | source_registry.py | 2 passing | Adapter discovery/registration |
-| **Exchange Clients** | ✅ Complete | exchange/*.py | 18 passing | SDK-backed Spot/UM/CM REST + WS |
-| **Gap Fill + Health** | ✅ Complete | workflow/gap_fill.py, workflow/health_check.py | — | Auto-detect gaps, lineage, health monitor |
-| **Sink (Silver Layer)** | ✅ Complete | workflow/sink.py | — | Bronze→Silver transform to Parquet/DuckLake |
-| **DuckLake Catalog** | ✅ Complete | workflow/catalog.py | — | DuckLake v1.0 native tables + partitioning |
-| **Iceberg Catalog** | ✅ Complete | workflow/catalog.py | — | PyIceberg file-system catalog for multi-engine |
-| **Metadata Tables** | ✅ Complete | workflow/metadata.py | — | venues.parquet + symbols.parquet |
-| **OKX/Bybit** | 🔄 Via CCXT | exchange/ccxt_rest.py | — | CCXTExchangeClient(exchange_id) |
-| **Skills (5x)** | ⏳ Planned | — | — | See skills-subagents.md |
-| **MetricsCollector** | ❌ Removed | — | — | Scop cut; health check covers quality |
+| Component | Status | File | Notes |
+|-----------|--------|------|-------|
+| **DataSourceAdapter** | ✅ Complete | adapter/protocol.py | 3 methods |
+| **BinanceAdapter** | ✅ Complete | adapter/binance.py | Wraps ArchiveClient |
+| **SourceRegistry** | ✅ Complete | adapter/registry.py | Module-level singleton |
+| **Pydantic models** | ✅ Complete | dlt/models.py | 8 models (Raw*, Kline*, etc.) |
+| **Pandera schemas** | ✅ Complete | validation/schemas.py | 6 schemas (Bronze*Silver*) |
+| **Bronze→Silver transforms** | ✅ Complete | transforms/ | klines, agg_trades, funding_rate |
+| **Exchange Clients** | ✅ Complete | exchange/*.py | SDK-backed Spot/UM/CM REST + WS |
+| **DuckLake storage** | ✅ Complete | dlt/destinations.py | dlt destination by default |
+| **Prefect orchestration** | ✅ Complete | workflow/prefect_flows.py | 4 flows, concurrency guards |
+| **Metadata tables** | ✅ Complete | workflow/metadata.py | venues.parquet, symbols.parquet |
+| **CLI commands** | ✅ Complete | cli/archive.py | 7 commands (list-symbols→refresh-metadata) |
+| **DataContract** | ❌ Removed | — | Phase 35 YAGNI cleanup |
+| **Skills** | ⏳ Not impl. | — | No skills/ directory |
+| **IcebergCatalog** | ❌ Removed | — | Phase 36 YAGNI cleanup |
 
 ---
 
@@ -172,21 +159,28 @@ This index provides a complete picture of the binance-datatool project after com
 - [x] Auto gap detection + health monitoring workflows
 
 ### Phase 7: Silver Layer & DuckLake Catalog (✅ COMPLETE)
-- [x] Polars-based Bronze→Silver transform (kline, trades, fundingRate schemas)
+- [x] Polars-based Bronze→Silver transform (klines, aggTrades, fundingRate)
 - [x] Silver schemas following Databento DBN (ts_event, ts_recv) + tardis.dev
-- [x] DuckLake v1.0 native tables with partitioning (symbol, interval, day)
-- [x] Iceberg catalog for multi-engine access (pyiceberg compatible)
+- [x] DuckLake v1.0 native tables with partitioning (exchange, data-type, symbol, interval, date)
+- [x] Self-describing catalog paths: exchange=binance-spot/data-type=klines/symbol=BTCUSDT/interval=1h/date=N/data.parquet
 - [x] Venue/symbol metadata tables (venues.parquet, symbols.parquet)
-- [x] Self-describing catalog paths: exchange/binance-spot/data-type=klines/symbol=BTCUSDT/interval=1h/date=N/data.parquet
-- [x] Analytics views: daily_ohlcv, latest_klines, stale_symbols
 - [x] CLI: gap-fill, health, sink, refresh-metadata commands
+- [x] Pandera validation at Polars boundary (6 schemas)
+- [x] Pydantic models at dlt ingest boundary (8 models, all VARCHAR for bronze)
+
+### Phase 42: Legacy Consolidation (✅ COMPLETE — 2026-05-16)
+- [x] Re-introduced minimal adapter package (DataSourceAdapter + BinanceAdapter + SourceRegistry)
+- [x] Wired CLI list-symbols to registry (`--source adapter` opt-in)
+- [x] Guard test for legacy workflow.legacy imports (pre-commit + CI)
+- [x] Deprecated notes on legacy wrappers (gap_fill, sink, prefect_flows)
+- [x] Docs sweep (AGENTS.md, extending.md, data-flows.md, implementation-guide.md)
+- [x] Pydantic ↔ Pandera alignment audit (constraints consistent)
 
 ### Phase 8: Planned Future Work (⏳)
-- [ ] Skills/subagents implementation (5 core skills)
-- [ ] OKX/Bybit via CCXT full integration
-- [ ] CLI `--source` flag for SourceRegistry
-- [ ] Gap-fill → Silver auto-pipeline
-- [ ] Mermaid/add diagrams for documentation
+- [ ] CoinbaseAdapter or other exchange adapters (demand-driven)
+- [ ] Prefect flows for multi-symbol fan-out (historical_pipeline bulk backfill)
+- [ ] Mermaid diagrams for documentation
+- [ ] SQLMesh INCREMENTAL_BY_TIME_RANGE models (optional path alongside Polars)
 
 ## 🧪 Testing Strategy
 
@@ -201,29 +195,33 @@ This index provides a complete picture of the binance-datatool project after com
 ### Current Test Status
 
 ```
-✅ Exchange client tests: 18 passing (SDK-backed)
-✅ DataContract tests: 24 passing
-✅ LineageTracker tests: 24 passing
-✅ BinanceAdapter tests: 35 passing
-✅ All tests combined: 249 passing, 9 skipped
+✅ Validation layer: 21 passing (Pandera schemas + Pydantic models + consistency)
+✅ CLI tests: 32 passing, 2 skipped (integration)
+✅ Adapter guard: 1 passing (legacy imports whitelist)
+✅ Archive workflow tests: 36 passing
+✅ All tests combined: 277 passing, 8 skipped (unit)
 ---
-Target: 200+ tests — exceeded (249 passing)
+Run: uv run pytest tests/ -q --ignore=tests/test_e2e_correctness.py
 ```
 
-### Running Tests
+# Running Tests
 
 ```bash
-# All tests
-uv run pytest
+# All unit tests (no network)
+uv run pytest tests/ -q --ignore=tests/test_e2e_correctness.py
 
 # Specific layer
-uv run pytest tests/test_datacontract.py -v
+uv run pytest tests/test_validation.py -v
 
 # With coverage
 uv run pytest --cov=binance_datatool --cov-report=html
 
-# Integration only
-uv run pytest -m integration
+# Integration tests (requires network)
+uv run pytest tests/ --run-integration
+
+# Linting
+uv run ruff check .
+uv run ruff format .
 ```
 
 ---
@@ -232,9 +230,9 @@ uv run pytest -m integration
 
 ### For Implementers
 
-1. **Read** `requirements.md` (understand the "why")
+1. **Read** `AGENTS.md` (understand the current working model)
 2. **Read** `data-flows.md` (understand the "how")
-3. **Follow** `implementation-guide.md` (build the "what")
+3. **Follow** `extending.md` (add schemas, adapters, workflows)
 4. **Check** `specs-driven-development.md` before PR (audit checklist)
 
 ### For Code Reviewers
@@ -246,54 +244,51 @@ uv run pytest -m integration
 
 ### For AI Agents / Subagents
 
-- Reference `skills-subagents.md` for formal skill specifications
-- Import and call skill functions from `src/binance_datatool/skills/`
-- Follow error modes and retry logic documented per skill
-- Example agent code:
+- Reference `AGENTS.md` for the current architecture and working model
+- Import from `binance_datatool.adapter`, `binance_datatool.transforms`,
+  `binance_datatool.validation`, `binance_datatool.workflow.prefect_tasks`
+- Follow the adapter protocol (`DataSourceAdapter`) for multi-source extensions
+- Example adapter usage:
   ```python
-  from binance_datatool.skills import discover_symbols
+  from binance_datatool.adapter.registry import registry
 
-  result = await discover_symbols(
-      source="binance",
-      market_type="spot",
-      data_type="klines",
-      quote_asset="USDT"
-  )
-
-  if result["success"]:
-      print(f"Found {len(result['symbols'])} symbols")
-  else:
-      print(f"Error: {result['errors']}")
+  adapter = registry.get("binance")  # returns BinanceAdapter
+  symbols = await adapter.list_symbols(trade_type, data_freq, data_type)
   ```
+- For CLI commands, see `uv run binance-datatool --help`
 
 ---
 
 ## 🏗️ Architecture at a Glance
 
-### Current (Four Layers)
-```
-CLI Layer (typer commands)
-  ↓
-Workflow Layer (business logic)
-  ↓
-Archive Client Layer (S3 HTTP)
-  ↓
-Common Layer (enums, types, filters)
-```
+### Current Stack (dlt + Polars + Pandera + DuckLake)
 
-### Proposed (Six Layers)
 ```
-CLI / API Layer
-  ↓
-Orchestration / Pipeline Layer
-  ↓
-DataOps / Transform Layer (validation, contracts)
-  ↓
-Source Adapter Layer (binance via S3, OKX/Bybit via CCXT)
-  ↓
-Storage Connector Layer (S3, local, delta, parquet)
-  ↓
-Foundation Layer (shared types, enums, filters)
+CLI Layer (Typer commands) ───────────────────────────────────────────────┐
+  list-symbols, list-files, download, verify, gap-fill,                  │
+  health, sink, refresh-metadata                                           │
+  ↓                                                                        │
+Workflow / Prefect Layer ────────────────────────────────────────────────┤
+  ArchiveListSymbolsWorkflow, GapFillWorkflow, HealthCheckWorkflow,      │
+  SinkWorkflow, MetadataWorkflow, Prefect flows (historical_pipeline)  │
+  ↓                                                                        │
+Adapter Layer ───────────────────────────────────────────────────────────┤
+  DataSourceAdapter protocol + BinanceAdapter (wraps ArchiveClient)      │
+  SourceRegistry for multi-source discovery                               │
+  ↓                                                                        │
+Data Source Layer ───────────────────────────────────────────────────────┤
+  Archive (data.binance.vision S3) | REST API (Binance SDK) | WS Stream   │
+  ↓                                                                        │
+DLT Extract + Load ───────────────────────────────────────────────────────┤
+  bronze.klines / bronze.agg_trades / bronze.funding_rate (VARCHAR)       │
+  Per-record Pydantic validation (RawKlineModel, RawAggTradeModel, ...)  │
+  ↓                                                                        │
+Polars Transform ─────────────────────────────────────────────────────────┤
+  bronze_*_to_silver() with timestamp normalization, μs auto-detection   │
+  ↓ Pandera validation at boundary                                        │
+DuckLake / DuckDB Silver ────────────────────────────────────────────────┤
+  silver.klines (19 cols) | silver.agg_trades (18 cols)                  │
+  silver.funding_rate (12 cols)                                           │
 ```
 
 **Key Addition**: Adapter layer abstracts source-specific behavior; enables multi-source support.
@@ -375,14 +370,12 @@ Full checklist in `docs/specs-driven-development.md`.
 
 ## 🎓 Learning Path (For New Contributors)
 
-1. Read `requirements.md` (15 min) — understand the problem
-2. Read `architecture.md` (10 min) — understand the solution structure
-3. Read `data-flows.md` (30 min) — understand how data moves through system
-4. Review `datacontract.py` + tests (20 min) — see TDD in action
-5. Follow `implementation-guide.md` Step 1 (60 min) — implement LineageTracker
+1. Read `AGENTS.md` (15 min) — understand the stack architecture and working model
+2. Read `architecture.md` (10 min) — understand the package structure
+3. Read `data-flows.md` (20 min) — understand how data moves through the system
+4. Review `transforms/klines.py` + `validation/schemas.py` (15 min) — see Polars + Pandera in action
+5. Follow `extending.md` to add a new Pandera schema or adapter method (30 min)
 6. Submit PR with audit checklist (see `specs-driven-development.md`)
-
-Total: ~2.5 hours to complete Phase 2, Step 1.
 
 ---
 
@@ -394,44 +387,53 @@ If unclear on:
 - **Architecture**: Check `data-flows.md` or architecture diagram in `requirements.md`
 - **Code examples**: Check `implementation-guide.md` or existing tests (`test_datacontract.py`, `test_source_registry.py`)
 - **Development process**: Check `specs-driven-development.md` pre-merge checklist
-- **Next steps**: Check `implementation-guide.md` and TODO list at end of this document
+- **Code examples**: Check `AGENTS.md`, `extending.md`, or existing tests (`tests/test_validation.py`)
+- **Development process**: Check `specs-driven-development.md` pre-merge checklist
+- **Next steps**: Check `tasks.md` Phase 42 and AGENTS.md
 
 ---
 
-## 📌 Project TODO
+## 📌 Project Status
 
-### Complete (Phase 6-7)
+### Complete
 
-- [x] Exchange SDK migration (official binance-sdk-spot, binance-sdk-derivatives-*)
-- [x] Silver layer: Bronze→Silver transform + Parquet/DuckLake
-- [x] DuckLake v1.0: native tables with ACID, snapshots, partitioning
-- [x] Auto gap detection + health check + lineage tracking
+- [x] Adapter package re-introduced (Phase 42): DataSourceAdapter + BinanceAdapter + SourceRegistry
+- [x] Pydantic ↔ Pandera alignment audit (Phase 42): constraints consistent, 21 validation tests
+- [x] Legacy wrappers annotated (Phase 42): gap_fill, sink, prefect_flows
+- [x] Guard test for legacy imports (Phase 42): pre-commit hook
+- [x] CLI `--source adapter` opt-in path wired for list-symbols
+- [x] Docs sweep complete (Phase 42): AGENTS.md, extending.md, INDEX.md, implementation-guide.md
+- [x] Exchange SDK migration (Phase 8): official binance-sdk-spot/derivatives-*
+- [x] Silver layer: Bronze→Silver transform + Polars + DuckLake
+- [x] Auto gap detection + health check
 - [x] Venue/symbol metadata (venues.parquet, symbols.parquet)
-- [x] CLI: gap-fill, health, sink, refresh-metadata
-- [x] Tests: 249 passing, 9 skipped
+- [x] CLI: 7 commands (list-symbols → refresh-metadata)
+- [x] Tests: 277 passing, 8 skipped (unit)
 
-### Next Steps
+### Open Items
 
-- [ ] Skills/subagents implementation (5 core skills)
-- [ ] OKX/Bybit via CCXT full integration
-- [ ] CLI `--source` flag for SourceRegistry
-- [ ] Gap-fill → Silver auto-pipeline (detect → fetch → sink)
+- [ ] Remove legacy wrappers after 2-week zero-usage confirmation (Phase 42 removal plan)
+- [ ] Wire remaining CLI commands to `--source adapter` path
+- [ ] Prefect bulk backfill validation in staging
+- [ ] SQLMesh INCREMENTAL_BY_TIME_RANGE models (optional, alongside Polars)
+- [ ] Mermaid diagrams for documentation
 
 ---
 
 ## ✨ Summary
 
-**Status**: Bronze→Silver→DuckLake pipeline complete. Ready for skills/subagents and advanced DataOps workflows.
+**Status**: Bronze→Silver→DuckLake pipeline validated. Adapter layer reintroduced (Phase 42). Legacy wrappers annotated for removal. Documentation synchronized with current codebase.
 
 **Impact**: This work enables:
-- End-to-end data pipeline: Archive → Bronze → Silver → DuckLake/Iceberg
+- End-to-end data pipeline: Archive → Bronze (dlt) → Silver (Polars) → DuckLake
 - Official Binance SDK integration for REST/WS market data
-- DuckLake v1.0 lakehouse with ACID transactions, snapshots, time-travel
+- DuckLake v1.0 lakehouse with ACID transactions, partitioning, time-travel
 - DataOps: auto gap detection, health monitoring, lineage tracking
-- Multi-engine access: Polars, DuckDB, Iceberg-compatible readers
-- Agent-driven workflows with formal CLI commands
+- Multi-engine access: Polars, DuckDB read Parquet in-place
+- Agent-friendly CLI with formal commands and adapter protocol
+- Pydantic + Pandera dual-layer validation (per-record + per-DataFrame)
 
-**Next Step**: Skills/subagents implementation (5 core skills).
+**Next Step**: Staging validation of adapter-enabled Prefect flows + legacy removal.
 
 ---
 

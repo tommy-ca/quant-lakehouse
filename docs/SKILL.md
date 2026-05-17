@@ -121,6 +121,12 @@ Requires `--interval` parameter. Valid intervals: `1m`, `3m`, `5m`, `15m`, `30m`
 - `bookTicker` — Best bid/ask (no interval)
 - `fundingRate` — Perpetual funding rates (no interval, um/cm only)
 
+Adapter note:
+- A minimal adapter package exists at `src/binance_datatool/adapter/`. It exposes
+  a tiny `DataSourceAdapter` protocol and a `BinanceAdapter` wrapper around the
+  `ArchiveClient`. The canonical ingestion path remains dlt → Polars → Pandera →
+  DuckLake; adapters are only necessary when adding new external sources.
+
 ## Trade Types
 
 | Type | Description | Market |

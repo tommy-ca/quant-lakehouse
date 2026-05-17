@@ -13,6 +13,11 @@ from loguru import logger
 
 from binance_datatool.workflow.legacy.lineage import LineageEvent, LineageEventType
 
+# NOTE: This module still uses the legacy LineageEvent helper as a small
+# compatibility shim. See tasks.md Phase 42 for the planned removal window
+# and consolidation instructions. Prefer the lineage APIs in the new dlt/prefect
+# task modules for new code.
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 

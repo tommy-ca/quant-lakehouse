@@ -50,6 +50,17 @@ def extract_agg_trades(
     return _run_dlt(source, source_name=f"agg_trades_{trade_type}", catalog_path=catalog_path)
 
 
+def extract_trades(
+    symbol: str,
+    trade_type: str = "spot",
+    catalog_path: str | None = None,
+) -> dict:
+    """Run dlt pipeline to ingest Binance raw trades for one symbol."""
+    tt = TradeType(trade_type)
+    source = build_binance_source(symbols=[symbol], data_type="trades", trade_type=tt)
+    return _run_dlt(source, source_name=f"trades_{trade_type}", catalog_path=catalog_path)
+
+
 def extract_funding_rate(
     symbol: str,
     trade_type: str = "um",
@@ -125,7 +136,7 @@ def extract_metadata(
     types = [TradeType(tt) for tt in trade_types]
     source = build_metadata_source(trade_types=types)
     return _run_dlt(
-        source, source_name="metadata", catalog_path=catalog_path, dataset_name="metadata"
+        source, source_name="binance_metadata", catalog_path=catalog_path, dataset_name="metadata"
     )
 
 

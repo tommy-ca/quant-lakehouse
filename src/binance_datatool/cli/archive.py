@@ -120,9 +120,10 @@ def list_symbols_command(
         from binance_datatool.workflow.prefect_flows import run_dlt_metadata
 
         run_dlt_metadata(trade_types=[trade_type.value], catalog_path=_cat)
-        import duckdb
 
-        con = duckdb.connect(str(Path(_cat) / "catalog.duckdb"))
+        from binance_datatool.storage.duckdb import get_connection
+
+        con = get_connection(lake_path=_cat)
         rows = con.execute(
             "SELECT symbol FROM metadata.symbols WHERE trade_type = ? ORDER BY symbol",
             [trade_type.value],
@@ -139,7 +140,10 @@ def list_symbols_command(
             typer.echo(sym)
         return
 
-    # Live S3 listing (legacy fallback)
+    # Live S3 listing path: prefer the legacy ArchiveListSymbolsWorkflow by
+    # default to preserve existing behaviour and tests. An explicit
+    # `--source adapter` option will use the adapter registry to resolve a
+    # source implementation (this is an opt-in path for new integrations).
     symbol_filter = build_symbol_filter(
         trade_type=trade_type,
         quote_assets=frozenset(quote.upper() for quote in quotes) if quotes else None,
@@ -147,6 +151,37 @@ def list_symbols_command(
         exclude_stable_pairs=exclude_stables,
         contract_type=contract_type,
     )
+
+    if source == "adapter":
+        from binance_datatool.adapter.registry import registry
+
+        adapter = registry.get("binance")
+        if adapter is None:
+            # Fallback to the legacy workflow path if registry resolution fails.
+            workflow = ArchiveListSymbolsWorkflow(
+                trade_type=trade_type,
+                data_freq=data_freq,
+                data_type=data_type,
+                symbol_filter=symbol_filter,
+            )
+            for info in asyncio.run(workflow.run()).matched:
+                typer.echo(info.symbol)
+            return
+
+        syms = asyncio.run(adapter.list_symbols(trade_type, data_freq, data_type))
+        # Apply CLI filters in-memory (same as catalog path)
+        for s in syms:
+            if quotes and not any(s.endswith(q) for q in [q.upper() for q in quotes]):
+                continue
+            if exclude_stables and any(
+                stable in s for stable in ("USDC", "USDP", "DAI", "TUSD", "BUSD", "FDUSD")
+            ):
+                continue
+            typer.echo(s)
+        return
+
+    # Default legacy flow (ArchiveListSymbolsWorkflow) — preserves existing
+    # behaviour and test expectations.
     workflow = ArchiveListSymbolsWorkflow(
         trade_type=trade_type,
         data_freq=data_freq,
@@ -161,10 +196,15 @@ def _refresh_and_query(trade_type: TradeType, catalog_path: str, ttl: int) -> No
     """Run metadata refresh inline (no Prefect server)."""
     import asyncio
 
-    from binance_datatool.archive.client import ArchiveClient
+    from binance_datatool.adapter.registry import registry
     from binance_datatool.workflow.metadata import MetadataWorkflow
 
-    client = ArchiveClient()
+    adapter = registry.get("binance")
+    client = adapter.client if adapter else None
+    if client is None:
+        typer.echo("ArchiveClient unavailable — cannot refresh metadata.", err=True)
+        raise typer.Exit(1)
+
     wf = MetadataWorkflow(
         archive_client=client,
         catalog_path=Path(catalog_path),

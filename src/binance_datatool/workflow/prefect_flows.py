@@ -39,17 +39,24 @@ from binance_datatool.workflow import (
 )
 from binance_datatool.workflow.health_check import check_ducklake_anomalies
 from binance_datatool.workflow.legacy.lineage import LineageTracker
+
+# Note: This module still imports a small legacy helper (LineageTracker) as a
+# backward-compatibility fallback. See tasks.md Phase 42 for the planned
+# consolidation and removal timeline. These legacy imports are wrappers and
+# should be removed after migration validation in staging.
 from binance_datatool.workflow.prefect_tasks.extract import (
     detect_gaps,
     extract_agg_trades,
     extract_archive,
     extract_funding_rate,
     extract_klines,
+    extract_trades,
 )
 from binance_datatool.workflow.prefect_tasks.transform import (
     transform_agg_trades,
     transform_funding_rate,
     transform_klines,
+    transform_trades,
 )
 
 _DEFAULT_ARCHIVE_HOME = settings.archive_home
@@ -198,13 +205,58 @@ def sink_silver(
     archive_home: Path | None = None,
     catalog_path: Path | None = None,
 ) -> int:
-    """Sink to DuckLake via SinkWorkflow. Serialized via concurrency guard."""
+    """Sink to DuckLake. Prefers dlt + Polars transforms from DuckDB bronze tables.
+
+    Falls back to legacy SinkWorkflow for file-based archive data.
+    Serialized via concurrency guard.
+    """
     from prefect.concurrency.sync import concurrency as _pcon
 
     with _pcon("ducklake-writer", occupy=1):
         home = archive_home or _DEFAULT_ARCHIVE_HOME
         catalog = catalog_path or home.parent / "lake"
         catalog.mkdir(parents=True, exist_ok=True)
+        db_path = str(catalog / "catalog.duckdb")
+
+        # Try dlt path first (DuckDB bronze tables)
+        _TRANSFORMS = {
+            "klines": transform_klines,
+            "aggTrades": transform_agg_trades,
+            "trades": transform_trades,
+            "fundingRate": transform_funding_rate,
+        }
+        transform_func = _TRANSFORMS.get(data_type)
+        if transform_func:
+            try:
+                import duckdb
+
+                con = duckdb.connect(db_path)
+                tbl_map = {
+                    "klines": "bronze.klines",
+                    "aggTrades": "bronze.agg_trades",
+                    "trades": "bronze.trades",
+                    "fundingRate": "bronze.funding_rate",
+                }
+                tbl = tbl_map.get(data_type)
+                if tbl:
+                    row = con.execute(
+                        f"SELECT COUNT(*) FROM {tbl} WHERE symbol = ?", [symbol]
+                    ).fetchone()
+                    if row and row[0] > 0:
+                        con.close()
+                        kwargs = {
+                            "symbol": symbol,
+                            "trade_type": trade_type.value,
+                            "catalog_path": db_path,
+                        }
+                        if data_type == "klines":
+                            kwargs["interval"] = interval
+                        return transform_func(**kwargs)
+                con.close()
+            except Exception as e:
+                _log.debug("dlt transform failed for %s, falling back: %s", symbol, e)
+
+        # Fallback to legacy SinkWorkflow
         (catalog / "data").mkdir(parents=True, exist_ok=True)
         dt = DataType(data_type)
         workflow = SinkWorkflow(
@@ -462,30 +514,56 @@ def sink_flow(
     archive_home: Path | None = None,
     catalog_path: Path | None = None,
 ) -> int:
-    """Sink to DuckLake. Uses dlt transform when bronze tables exist,
-    falls back to legacy SinkWorkflow for file-based archive data."""
+    """Sink to DuckLake. Prefers dlt + Polars transforms from DuckDB bronze tables.
+
+    Falls back to legacy SinkWorkflow only if bronze tables are empty or missing.
+    """
     tt = TradeType(trade_type)
     db_path = str(catalog_path / "catalog.duckdb") if catalog_path else None
     _iv = interval if data_type == "klines" else None
     total = 0
+
+    # Dispatch map for new transforms
+    _TRANSFORMS = {
+        "klines": transform_to_silver,
+        "aggTrades": transform_agg_trades_to_silver,
+        "trades": transform_trades_to_silver,
+        "fundingRate": transform_funding_rate_to_silver,
+    }
+    transform_task = _TRANSFORMS.get(data_type)
+
     for sym in symbols:
         # Try dlt path first (DuckDB bronze tables)
-        try:
-            import duckdb
+        if transform_task:
+            try:
+                import duckdb
 
-            con = duckdb.connect(db_path or ":memory:")
-            tbl = "bronze.klines" if data_type == "klines" else None
-            if tbl:
-                row = con.execute(f"SELECT COUNT(*) FROM {tbl}", []).fetchone()
-                if row and row[0] > 0:
-                    con.close()
-                    total += transform_to_silver(sym, _iv, trade_type, db_path)
-                    continue
-            con.close()
-        except Exception:
-            pass
+                con = duckdb.connect(db_path or ":memory:")
+                # Determine bronze table name
+                tbl_map = {
+                    "klines": "bronze.klines",
+                    "aggTrades": "bronze.agg_trades",
+                    "trades": "bronze.trades",
+                    "fundingRate": "bronze.funding_rate",
+                }
+                tbl = tbl_map.get(data_type)
+                if tbl:
+                    row = con.execute(
+                        f"SELECT COUNT(*) FROM {tbl} WHERE symbol = ?", [sym]
+                    ).fetchone()
+                    if row and row[0] > 0:
+                        con.close()
+                        kwargs = {"symbol": sym, "trade_type": trade_type, "catalog_path": db_path}
+                        if data_type == "klines":
+                            kwargs["interval"] = _iv
+                        total += transform_task(**kwargs)
+                        continue
+                con.close()
+            except Exception as e:
+                _log.debug("dlt transform failed for %s, falling back: %s", sym, e)
+
         # Fallback to legacy SinkWorkflow
-        total += sink_silver(tt, sym, data_type, _iv, 30, archive_home, catalog_path)
+        total += sink_silver(tt, sym, data_type, _iv or "1h", 30, archive_home, catalog_path)
     return total
 
 
@@ -684,6 +762,17 @@ def run_dlt_agg_trades(
 
 
 @task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
+def run_dlt_trades(
+    symbol: str,
+    trade_type: str = "spot",
+    catalog_path: str | None = None,
+) -> dict:
+    """Run dlt pipeline to ingest Binance raw trades for one symbol."""
+
+    return extract_trades(symbol, trade_type, catalog_path)
+
+
+@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
 def run_dlt_funding_rate(
     symbol: str,
     trade_type: str = "um",
@@ -720,6 +809,16 @@ def transform_agg_trades_to_silver(
 ) -> int:
     """Read bronze aggTrades from DuckDB, transform to Silver, write back."""
     return transform_agg_trades(symbol, trade_type, catalog_path)
+
+
+@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
+def transform_trades_to_silver(
+    symbol: str,
+    trade_type: str = "spot",
+    catalog_path: str | None = None,
+) -> int:
+    """Read bronze trades from DuckDB, transform to Silver, write back."""
+    return transform_trades(symbol, trade_type, catalog_path)
 
 
 @task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
@@ -866,6 +965,7 @@ def prepare_symbol_dlt(
     _DISPATCH: dict[str, tuple] = {
         "klines": (run_dlt_source, transform_to_silver),
         "aggTrades": (run_dlt_agg_trades, transform_agg_trades_to_silver),
+        "trades": (run_dlt_trades, transform_trades_to_silver),
         "fundingRate": (run_dlt_funding_rate, transform_funding_rate_to_silver),
     }
     dlt_task, transform_task = _DISPATCH.get(data_type, (run_dlt_source, transform_to_silver))

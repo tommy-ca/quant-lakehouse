@@ -26,3 +26,9 @@ repos:
         pass_filenames: false
         always_run: true
         verbose: true
+      - id: legacy-imports-guard
+        name: legacy imports guard
+        entry: uv run pytest tests/test_no_unapproved_legacy_imports.py -v
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]

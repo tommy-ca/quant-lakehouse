@@ -51,6 +51,7 @@ Each component handles its strength — no overlap:
 | **Prefect** | Orchestration (flow composition, parallelism, retries, concurrency guards, DLQ, cron scheduling) | `binance_datatool.workflow.prefect_flows` (thin @flow defs) + `workflow.prefect_tasks` (importable business logic) |
 | **DuckLake** | Primary storage — lakehouse with Parquet files + sqlite catalog. dlt destination by default. Handles partitioning, ACID, snapshots automatically. | `dlt.destinations.ducklake()` — managed by dlt; no manual catalog setup needed |
 | **DuckDB** | Legacy/fallback storage — single-file database. Used for unit tests and backward compatibility. | `dlt.destinations.duckdb()` — use via explicit `destination="duckdb"` |
+| **Adapters** | Minimal source adapters for multi-source support | `binance_datatool.adapter` — `DataSourceAdapter` protocol + `BinanceAdapter` (wraps ArchiveClient) |
 
 ### Data Flow
 
@@ -428,6 +429,19 @@ HealthCheckWorkflow → completeness, freshness, integrity
 SinkWorkflow → Polars → DuckLake v1.0
 ```
 
+### Legacy Status & Removal Plan
+
+Some modules remain as explicit legacy fallbacks to preserve backward compatibility during migration. These fallbacks are small, documented, and scheduled for removal once the new dlt + Prefect pipeline is validated in staging.
+
+Files currently importing `workflow/legacy` (audit snapshot):
+- `src/binance_datatool/workflow/prefect_flows.py` — legacy LineageTracker fallback
+- `src/binance_datatool/workflow/sink.py` — legacy LineageEvent usage
+- `src/binance_datatool/workflow/gap_fill.py` — legacy lineage import
+- `src/binance_datatool/cli/archive.py` — S3 live listing / archive file integrity fallback
+
+Action: mark these modules as @deprecated wrappers in-code and remove them after 2 weeks of zero production usage (or after an explicit `remove-legacy` milestone). See `tasks.md` Phase 42 for the consolidation checklist.
+
+
 ### dlt Pipeline (Prefect-orchestrated: ``dlt_sqlmesh_pipeline``)
 
 ```
@@ -450,17 +464,29 @@ DuckDB Silver tables (via storage.duckdb)
 
 ### Validation Layer (``binance_datatool.validation``)
 
-| Layer | Pandera Schema | Pydantic Model | Enforces |
-|-------|---------------|----------------|----------|
-| Bronze klines | ``BronzeKlinesSchema`` | ``KlineModel`` | types, nullability, ge/le, high>=low |
-| Bronze aggTrades | ``BronzeAggTradesSchema`` | ``RawAggTradeModel`` | VARCHAR-only columns, nullability |
-| Bronze fundingRate | ``BronzeFundingRateSchema`` | ``RawFundingRateModel`` | VARCHAR-only columns, nullability |
-| Silver klines | ``SilverKlinesSchema`` | — | 19 silver columns, cross-column checks |
-| Silver aggTrades | ``AggTradesSilverSchema`` | — | 18 columns, price>0, size>=0, include first/last_trade_id |
+The validation layer has two levels:
+
+**Per-record (dlt Pydantic models — authoritative at ingest)**:
+```
+dlt resources → columns=RawKlineModel/RawAggTradeModel/RawFundingRateModel
+             → validates before写入 DuckDB bronze
+```
+
+**Per-DataFrame (Pandera schemas — validates at transform boundary)**:
+```
+Polars transforms → validate_silver_klines/agg_trades/funding_rate → DuckDB silver
+```
+
+| Stage | Pandera Schema | Pydantic Model (dlt authoritative) | Enforces |
+|-------|---------------|-------------------------------------|----------|
+| Bronze klines | ``BronzeKlinesSchema`` | ``RawKlineModel`` (all VARCHAR) | column presence, ge>=0, high>=low |
+| Bronze aggTrades | ``BronzeAggTradesSchema`` | ``RawAggTradeModel`` (all VARCHAR) | column presence, nullable |
+| Bronze fundingRate | ``BronzeFundingRateSchema`` | ``RawFundingRateModel`` (all VARCHAR) | column presence, nullable |
+| Silver klines | ``SilverKlinesSchema`` | — | 19 columns, cross-column checks (high>=low) |
+| Silver aggTrades | ``AggTradesSilverSchema`` | — | 18 columns, price>=0, size>=0, first/last_trade_id |
 | Silver fundingRate | ``FundingRateSilverSchema`` | — | 12 columns |
-| dlt REST klines | — | ``KlineModel`` | pydantic field validators (dlt authoritative) |
-| dlt REST aggTrades | — | ``AggTradeModel`` | price>0, quantity>=0 |
-| dlt REST fundingRate | — | ``FundingRateModel`` | type-safe fields |
+
+**Key note**: `premiumIndexKlines` has negative values — `SilverKlinesSchema` enforces `ge>=0` on `open/high/low/close/volume`. These should use a separate schema or relaxed constraints until demand justifies the variant.
 
 ### Prefect Flow: ``dlt_sqlmesh_pipeline``
 

@@ -16,7 +16,7 @@ def bronze_agg_trades_to_silver(
     *,
     symbol: str = "",
     trade_type: Literal["spot", "um", "cm"] = "spot",
-    source: Literal["dlt_api", "archive", "ws_stream"] = "dlt_api",
+    source: Literal["dlt_api", "archive", "ws_stream", "api_filled"] = "dlt_api",
     validate: bool = True,
 ) -> pl.DataFrame:
     """Transform bronze aggTrades DataFrame to Silver schema.
@@ -32,6 +32,8 @@ def bronze_agg_trades_to_silver(
         symbol: Trading pair.
         trade_type: Market type.
         source: Source label.
+        validate: When True (default), validates the output DataFrame
+            against ``SilverAggTradesSchema``.
 
     Returns:
         Silver-normalized DataFrame matching the DuckLake aggTrades schema.
@@ -81,6 +83,98 @@ def bronze_agg_trades_to_silver(
             pl.when(is_us)
             .then((transact_time_col // 86_400_000_000).cast(pl.Int32).cast(pl.Date))
             .otherwise((transact_time_col // 86_400_000).cast(pl.Int32).cast(pl.Date))
+            .alias("ts_date"),
+        ]
+    ).select(
+        [
+            "ts_event",
+            "ts_recv",
+            "price",
+            "size",
+            "side",
+            "trade_id",
+            "is_buyer_maker",
+            "agg_trade_id",
+            "first_trade_id",
+            "last_trade_id",
+            "rtype",
+            "source",
+            "exchange",
+            "trade_type",
+            "symbol",
+            "data_type",
+            "ingested_at",
+            "ts_date",
+        ]
+    )
+
+    if validate:
+        validate_silver_agg_trades(result)
+
+    return result
+
+
+def bronze_trades_to_silver(
+    df: pl.DataFrame,
+    *,
+    symbol: str = "",
+    trade_type: Literal["spot", "um", "cm"] = "spot",
+    source: Literal["dlt_api", "archive", "ws_stream", "api_filled"] = "dlt_api",
+    validate: bool = True,
+) -> pl.DataFrame:
+    """Transform bronze raw trades DataFrame to Silver schema.
+
+    Handles both VARCHAR bronze input (strings) and typed input.
+    Uses the same Silver schema as aggTrades but with rtype='trade'.
+
+    Input columns: ``trade_id, price, qty, quote_qty, time, is_buyer_maker,
+    is_best_match``
+
+    Args:
+        df: Bronze trades DataFrame.
+        symbol: Trading pair.
+        trade_type: Market type.
+        source: Source label.
+        validate: When True (default), validates the output DataFrame
+            against ``SilverAggTradesSchema``.
+
+    Returns:
+        Silver-normalized DataFrame matching the DuckLake aggTrades schema.
+    """
+    now_us = int(datetime.now(UTC).timestamp() * 1_000_000)
+    exchange = exchange_for(trade_type)
+
+    time_col = pl.col("time").cast(pl.Int64)
+    is_us = time_col >= 1_000_000_000_000_000
+
+    result = df.with_columns(
+        [
+            pl.when(is_us).then(time_col).otherwise(time_col * 1000).alias("ts_event"),
+            pl.lit(now_us, dtype=pl.Int64).alias("ts_recv"),
+            pl.col("price").cast(pl.Float64),
+            pl.col("qty").cast(pl.Float64).alias("size"),
+            pl.when(pl.col("is_buyer_maker").cast(pl.Utf8).str.to_lowercase() == "false")
+            .then(pl.lit("buy"))
+            .otherwise(pl.lit("sell"))
+            .alias("side"),
+            pl.col("trade_id").cast(pl.Int64),
+            pl.when(pl.col("is_buyer_maker").cast(pl.Utf8).str.to_lowercase() == "true")
+            .then(pl.lit(1, pl.Int64))
+            .otherwise(pl.lit(0, pl.Int64))
+            .alias("is_buyer_maker"),
+            pl.lit(None, pl.Int64).alias("agg_trade_id"),
+            pl.lit(None, pl.Int64).alias("first_trade_id"),
+            pl.lit(None, pl.Int64).alias("last_trade_id"),
+            pl.lit("trade", dtype=pl.Utf8).alias("rtype"),
+            pl.lit(source, dtype=pl.Utf8).alias("source"),
+            pl.lit(exchange, dtype=pl.Utf8).alias("exchange"),
+            pl.lit(trade_type, dtype=pl.Utf8).alias("trade_type"),
+            pl.lit(symbol, dtype=pl.Utf8).alias("symbol"),
+            pl.lit("trades", dtype=pl.Utf8).alias("data_type"),
+            pl.lit(now_us, dtype=pl.Int64).alias("ingested_at"),
+            pl.when(is_us)
+            .then((time_col // 86_400_000_000).cast(pl.Int32).cast(pl.Date))
+            .otherwise((time_col // 86_400_000).cast(pl.Int32).cast(pl.Date))
             .alias("ts_date"),
         ]
     ).select(

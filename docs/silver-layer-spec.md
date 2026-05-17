@@ -1,6 +1,10 @@
 # Silver Layer: Normalized Data Schemas
 
-## Overview
+> **Note (2026-05-16):** `DuckLakeCatalog` class does not exist — dlt manages DuckLake
+> natively via `dlt.destinations.ducklake()`. Analytics views (`daily_ohlcv`, `latest_klines`,
+> `stale_symbols`) were removed in Phase 36. DuckLake catalog paths use the Hive-style
+> partitioning format documented below. For the current stack, see `AGENTS.md`
+> and `dlt/destinations.py`.
 
 The **Silver layer** is the transform/normalization stage of the medallion architecture.
 It converts raw archive data (Bronze) into clean, queryable, standardized schemas suitable
@@ -175,21 +179,19 @@ taker_buy_quote_volume   → taker_buy_quote_volume
 ## Data Flow: Archive → Silver Pipeline
 
 ```
-Archive (local ZIPs + filled CSVs)
+Archive (data.binance.vision S3) + REST API
   │
-  ├── ArchiveListSymbolsWorkflow (list-symbols)
-  │     → symbols metadata (symbols.parquet)
+  ├── dlt sources (bronze tables in DuckDB/DuckLake)
+  │     → RawKlineModel / RawAggTradeModel / RawFundingRateModel (VARCHAR, Pydantic)
+  │     → bronze.klines / bronze.agg_trades / bronze.funding_rate
   │
-  ├── SinkWorkflow (sink)
-  │     → read ZIP CSVs + filled CSVs
-  │     → Bronze → Silver transform (normalize, cast, add metadata)
-  │     → write partitioned Parquet: {catalog}/{type}/{data_type}/date=N/*.parquet
-  │     → DuckDB: CREATE OR REPLACE TABLE {type}_{data_type}
+  ├── Polars transforms (transforms/klines.py, transforms/agg_trades.py, transforms/funding_rate.py)
+  │     → Bronze → Silver (type cast, μs auto-detection, normalize, add metadata)
+  │     → Pandera validation at boundary (SilverKlinesSchema, AggTradesSilverSchema, ...)
   │
-  └── MetadataWorkflow (refresh-metadata)
-        → venues.parquet (3 venues: spot, um, cm)
-        → symbols.parquet (all symbols per trade type)
-        → Optionally from REST API: richer metadata (status, contract type)
+  └── DuckLake silver tables (dlt destination)
+        → silver.klines (19 cols) | silver.agg_trades (18 cols) | silver.funding_rate (12 cols)
+        → Partitioned: exchange=binance-spot/data-type=klines/symbol=BTCUSDT/interval=1h/date=N/data.parquet
 ```
 
 ## Commands
@@ -223,12 +225,7 @@ binance-datatool refresh-metadata um --from-api --catalog /path/to/lake
     │       └── symbol=BTCUSDT/
     │           └── interval=1h/
     │               └── date=2026-05-08/
-    │                   └── data.parquet        # Written by Polars
-    └── main/                                    # DuckLake managed path
-        └── klines/
-            └── symbol=BTCUSDT/
-                └── interval=1h/
-                    └── ducklake-*.parquet       # Managed by DuckDB
+    │                   └── data.parquet        # Written by Polars sink
 ```
 
 ## Iceberg Catalog (Proposal)
@@ -240,25 +237,22 @@ is required.
 
 ### Implementation
 ```python
-from pathlib import Path
-from binance_datatool.workflow.catalog import DuckLakeCatalog
+# DuckLake is configured via dlt destination (dlt/destinations.py)
+# No DuckLakeCatalog class exists — dlt manages the catalog natively.
+# See dlt/destinations.py for ducklake() configuration.
 
-# Create DuckLake catalog with native table management
-catalog = DuckLakeCatalog(lake_path=Path("/path/to/lake"), db_path="/path/to/db.duckdb")
-con = catalog.connect()
+# After sink, attach DuckLake for querying:
+import duckdb
+con = duckdb.connect("lake/catalog.duckdb")
+con.execute("LOAD ducklake")
+con.execute("ATTACH 'ducklake:lake/metadata.ducklake' AS dl "
+            "(DATA_PATH 'lake/data', AUTOMATIC_MIGRATION true)")
+con.execute("USE dl")
 
-# Create unified DuckLake native table with partitioning
-#  ALTER TABLE klines SET PARTITIONED BY (trade_type, symbol, interval, ts_date)
-catalog.ensure_table(con, "klines")
-
-# Ingest externally-written Parquet into managed DuckLake table
-#  INSERT INTO klines SELECT *, CAST(epoch_ms(ts_event) AS DATE) AS ts_date
-#  FROM read_parquet('path/to/data.parquet')
-parquet_files = catalog.find_parquet_files("spot", "klines", interval="1h")
-catalog.ingest_parquet(con, "klines", parquet_files)
-
-# Create analytics views (daily_ohlcv, stale_symbols)
-catalog.create_analytics_views(con)
+# Query silver klines
+rows = con.execute(
+    "SELECT symbol, COUNT(*) FROM klines WHERE trade_type = 'spot' GROUP BY symbol"
+).fetchall()
 ```
 
 ## DuckLake Catalog Design
@@ -284,9 +278,12 @@ SELECT trade_type, AVG(close) FROM klines WHERE symbol = 'BTCUSDT' GROUP BY trad
 ```
 
 ### Analytics Views
+> **Removed (Phase 36)** — analytics views (`daily_ohlcv`, `latest_klines`, `stale_symbols`)
+> were removed as YAGNI. DuckDB can query Silver tables directly via Parquet in-place
+> without defining views. If needed, define in your analytics layer.
+
 ```sql
--- Daily OHLCV aggregation (queries lake in-place)
-CREATE OR REPLACE VIEW daily_ohlcv AS
+-- Example: Daily OHLCV aggregation (query Silver table directly)
 SELECT CAST(ts_event / 86400000 AS DATE) AS trade_date,
        symbol, trade_type,
        FIRST(open) AS open, MAX(high) AS high,
@@ -294,39 +291,24 @@ SELECT CAST(ts_event / 86400000 AS DATE) AS trade_date,
        SUM(volume) AS volume
 FROM klines WHERE interval = '1h'
 GROUP BY trade_date, symbol, trade_type;
-
--- Latest data per symbol
-CREATE OR REPLACE VIEW latest_klines AS
-SELECT DISTINCT ON (symbol, trade_type, interval)
-       symbol, trade_type, interval, ts_event, close, volume, ingested_at
-FROM klines
-ORDER BY symbol, trade_type, interval, ts_event DESC;
-
--- Stale symbol detection
-CREATE OR REPLACE VIEW stale_symbols AS
-SELECT symbol, trade_type,
-       MAX(ts_event) AS latest_ts,
-       CAST(epoch_ms(MAX(ts_event)) AS DATE) AS latest_date,
-       DATEDIFF('day', CAST(epoch_ms(MAX(ts_event)) AS DATE), CURRENT_DATE) AS days_stale
-FROM klines GROUP BY symbol, trade_type
-HAVING days_stale > 3;
 ```
 
 ### DuckLake Catalog Implementation
 
 ```python
-from pathlib import Path
-from binance_datatool.workflow.catalog import DuckLakeCatalog
+# DuckLake catalog is managed by dlt destination (dlt/destinations.py)
+# Manual attachment for ad-hoc querying:
+import duckdb
+con = duckdb.connect("lake/catalog.duckdb")
+con.execute("LOAD ducklake")
+con.execute(
+    "ATTACH 'ducklake:lake/metadata.ducklake' AS dl "
+    "(DATA_PATH 'lake/data', AUTOMATIC_MIGRATION true)"
+)
+con.execute("USE dl")
 
-# Create DuckLake catalog (ATTACH 'ducklake:metadata.ducklake' v1.0 format)
-catalog = DuckLakeCatalog(lake_path=Path("/path/to/lake"), db_path="/path/to/db.duckdb")
-con = catalog.connect()
-# Registers: klines, aggTrades, fundingRate, venues, symbols
-catalog.register_lake_views(con)
-# Registers: daily_ohlcv, latest_klines, stale_symbols
-catalog.create_analytics_views(con)
-# Query with ACID guarantees
-con.execute("SELECT symbol, MAX(close) FROM daily_ohlcv GROUP BY symbol")
+# Silver tables are automatically available: klines, aggTrades, fundingRate
+con.execute("SELECT symbol, COUNT(*) FROM klines GROUP BY symbol")
 ```
 
 ### CLI Command to Attach DuckLake

@@ -41,16 +41,25 @@ def build_pipeline(
         Configured ``dlt.Pipeline``.
     """
     if destination == "duckdb":
+        if catalog_path:
+            Path(catalog_path).parent.mkdir(parents=True, exist_ok=True)
         dest: str | dlt.Destination = (
             dlt.destinations.duckdb(catalog_path) if catalog_path else "duckdb"
         )
     else:
         # DuckLake: lakehouse with catalog + storage
         _lp = lake_path or (str(Path(catalog_path).parent) if catalog_path else "./lake")
+        lp_abs = str(Path(_lp).resolve())
+
+        # DuckLake catalog is a sqlite file named metadata.ducklake by project convention
+        catalog_abs = str(Path(lp_abs) / "metadata.ducklake")
+        Path(lp_abs).mkdir(parents=True, exist_ok=True)
+
         dest = dlt.destinations.ducklake(
             credentials=dlt.destinations.impl.ducklake.configuration.DuckLakeCredentials(
                 ducklake_name=source_name.replace("-", "_"),
-                storage=_lp,
+                catalog=f"sqlite:///{catalog_abs}",
+                storage=f"file://{lp_abs}",
             ),
         )
 

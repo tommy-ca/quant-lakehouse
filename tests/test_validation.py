@@ -1,7 +1,20 @@
-"""Tests for Pandera schemas and Pydantic models (validation module)."""
+"""Tests for Pandera schemas and Pydantic models (validation module).
+
+Test coverage:
+- Pydantic models: KlineModel (cross-field high>=low, non-negative volume),
+  AggTradeModel (positive price, non-negative quantity), FundingRateModel
+- Pandera schemas: BronzeKlinesSchema, SilverKlinesSchema,
+  AggTradesSilverSchema, FundingRateSilverSchema
+- Cross-column checks: high >= low for all kline-class schemas
+- ts_date type: all silver schemas use pl.Date (not object)
+- Alignment: Pydantic and Pandera enforce the same constraints
+"""
 
 from __future__ import annotations
 
+from datetime import date
+
+import pandera
 import polars as pl
 import pytest
 from pydantic import ValidationError
@@ -190,7 +203,7 @@ class TestBronzeKlinesSchema:
                 "extra_col": ["x"],
             }
         )
-        with pytest.raises((Exception,)):
+        with pytest.raises(pandera.errors.SchemaError):
             BronzeKlinesSchema.validate(df, lazy=False)
 
     def test_negative_volume_rejected(self):
@@ -211,7 +224,7 @@ class TestBronzeKlinesSchema:
                 "interval": ["1h"],
             }
         )
-        with pytest.raises((Exception,)):
+        with pytest.raises(pandera.errors.SchemaError):
             BronzeKlinesSchema.validate(df, lazy=False)
 
     def test_high_gte_low_check(self):
@@ -283,7 +296,7 @@ class TestSilverKlinesSchema:
                 "interval": ["1h"],
                 "data_type": ["klines"],
                 "ingested_at": [1700003600000000],
-                "ts_date": ["2023-11-14"],
+                "ts_date": [date(2023, 11, 14)],
             }
         )
 
@@ -300,3 +313,137 @@ class TestSilverKlinesSchema:
         )
         with pytest.raises(ValueError, match="high.*low"):
             validate_silver_klines(bad)
+
+
+class TestAggTradesSilverSchema:
+    """Tests for the silver aggTrades Pandera schema."""
+
+    def test_valid_df_passes(self):
+        df = pl.DataFrame(
+            {
+                "ts_event": [1700000000000000],
+                "ts_recv": [1700000001000000],
+                "price": [50000.0],
+                "size": [0.5],
+                "side": ["buy"],
+                "trade_id": [1],
+                "is_buyer_maker": [1],
+                "agg_trade_id": [1],
+                "first_trade_id": [0],
+                "last_trade_id": [0],
+                "rtype": ["agg"],
+                "source": ["dlt_api"],
+                "exchange": ["binance-spot"],
+                "trade_type": ["spot"],
+                "symbol": ["BTCUSDT"],
+                "data_type": ["aggTrades"],
+                "ingested_at": [1700000001000000],
+                "ts_date": [date(2023, 11, 14)],
+            }
+        )
+        from binance_datatool.validation.schemas import AggTradesSilverSchema
+
+        result = AggTradesSilverSchema.validate(df)
+        assert result is not None
+
+
+class TestFundingRateSilverSchema:
+    """Tests for the silver fundingRate Pandera schema."""
+
+    def test_valid_df_passes(self):
+        df = pl.DataFrame(
+            {
+                "ts_event": [1700000000000000],
+                "ts_recv": [1700000001000000],
+                "funding_rate": [0.0001],
+                "mark_price": [50000.0],
+                "funding_timestamp": [1700000000000000],
+                "source": ["dlt_api"],
+                "exchange": ["binance-perps-um"],
+                "trade_type": ["um"],
+                "symbol": ["BTCUSDT"],
+                "data_type": ["fundingRate"],
+                "ingested_at": [1700000001000000],
+                "ts_date": [date(2023, 11, 14)],
+            }
+        )
+        from binance_datatool.validation.schemas import FundingRateSilverSchema
+
+        result = FundingRateSilverSchema.validate(df)
+        assert result is not None
+
+
+class TestValidationConsistency:
+    """Verify Pydantic and Pandera enforce the same constraints on klines.
+
+    Both layers should agree on: high >= low, non-negative volume, positive
+    open_time. This test documents and enforces the consistency contract.
+    """
+
+    def test_kline_high_lt_low_rejected_by_both(self):
+        with pytest.raises(ValidationError):
+            KlineModel(
+                open_time=1700000000000,
+                open=100.0,
+                high=98.0,
+                low=101.0,
+                close=100.0,
+                volume=1000.0,
+                close_time=1700003600000,
+                symbol="BTCUSDT",
+                interval="1h",
+            )
+
+        bad_df = pl.DataFrame(
+            {
+                "open_time": [1700000000000],
+                "open": [100.0],
+                "high": [98.0],
+                "low": [101.0],
+                "close": [100.0],
+                "volume": [1000.0],
+                "close_time": [1700003600000],
+                "quote_volume": [100500.0],
+                "count": [500],
+                "taker_buy_volume": [600.0],
+                "taker_buy_quote_volume": [60300.0],
+                "symbol": ["BTCUSDT"],
+                "interval": ["1h"],
+            }
+        )
+        with pytest.raises(ValueError, match="high.*low"):
+            validate_bronze_klines(bad_df)
+
+    def test_kline_negative_volume_rejected_by_both(self):
+        with pytest.raises(ValidationError):
+            KlineModel(
+                open_time=1700000000000,
+                open=100.0,
+                high=101.0,
+                low=99.0,
+                close=100.5,
+                volume=-1.0,
+                close_time=1700003600000,
+                symbol="BTCUSDT",
+                interval="1h",
+            )
+
+        bad_df = pl.DataFrame(
+            {
+                "open_time": [1700000000000],
+                "open": [100.0],
+                "high": [101.0],
+                "low": [99.0],
+                "close": [100.5],
+                "volume": [-1.0],
+                "close_time": [1700003600000],
+                "quote_volume": [100500.0],
+                "count": [500],
+                "taker_buy_volume": [600.0],
+                "taker_buy_quote_volume": [60300.0],
+                "symbol": ["BTCUSDT"],
+                "interval": ["1h"],
+            }
+        )
+        with pytest.raises(pandera.errors.SchemaError):
+            BronzeKlinesSchema.validate(bad_df)

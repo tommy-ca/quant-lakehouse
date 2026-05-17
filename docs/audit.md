@@ -36,6 +36,13 @@ Summary of Findings
   `workflow/` (prefix building, kline interval rules). These should be
   consolidated into a SourceAdapter during migration to avoid duplication.
 
+- Update (2026-05-16): a minimal `DataSourceAdapter` protocol and a `SourceRegistry`
+  singleton have been added at `src/binance_datatool/adapter/`. The `BinanceAdapter`
+  wraps `ArchiveClient` and preserves the existing behaviour while providing a
+  small extension point for other sources. This change is intentionally narrow
+  to minimize risk; next steps include consolidating prefix and interval logic
+  into the adapter surface.
+
 4) Operational Concerns (High Risk)
 
 - The aria2 download approach is pragmatic but requires aria2 on the host.
