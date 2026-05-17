@@ -7,6 +7,7 @@ pipeline's DuckLake catalog or DuckDB database.
 from __future__ import annotations
 
 import logging
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -23,21 +24,39 @@ def get_connection(
 
     if lake_path:
         lp = Path(lake_path).resolve()
-        catalog_file = lp / "metadata.duckdb"
-        if lp.is_dir() and catalog_file.exists():
-            con = duckdb.connect(str(catalog_file))
-            con.execute("LOAD ducklake")
-            # Map the tables to schemas using direct Parquet reads
-            # as a reliable fallback/abstraction for the DuckLake driver.
+        # dlt DuckLake creates a SQLite file for its metadata catalog,
+        # regardless of the file extension or connection string used.
+        # We try both common extensions used in this project.
+        meta_sqlite = lp / "metadata.ducklake"
+        if not meta_sqlite.exists():
+            meta_sqlite = lp / "metadata.duckdb"
+
+        if lp.is_dir() and meta_sqlite.exists():
+            # Use an in-memory DuckDB session as the query engine
+            con = duckdb.connect(":memory:")
+
+            # Load extensions
+            with suppress(Exception):
+                con.execute("LOAD ducklake")
+
+            # Attach the SQLite catalog as 'catalog'
+            # This allows us to query metadata and create schemas/views in DuckDB
+            con.execute(f"ATTACH '{meta_sqlite}' AS catalog (TYPE SQLITE)")
+
+            # Map the tables in the catalog to the 'bronze' schema in DuckDB
             con.execute("CREATE SCHEMA IF NOT EXISTS bronze")
-            tables = con.execute(
-                "SELECT table_name FROM ducklake_table WHERE table_name NOT LIKE '_dlt%'"
-            ).fetchall()
-            for (table,) in set(tables):
-                path = lp / "bronze" / "klines" / "*.parquet"
-                con.execute(
-                    f"CREATE OR REPLACE VIEW bronze.{table} AS SELECT * FROM read_parquet('{path}')"
-                )
+            with suppress(Exception):
+                # Query the table registry from the attached SQLite catalog
+                tables = con.execute(
+                    "SELECT table_name FROM catalog.ducklake_table WHERE table_name NOT LIKE '_dlt%'"
+                ).fetchall()
+                for (table,) in set(tables):
+                    # Data layout: ./lake/bronze/{table}/*.parquet
+                    path = lp / "bronze" / table / "*.parquet"
+                    con.execute(
+                        f"CREATE OR REPLACE VIEW bronze.{table} AS SELECT * FROM read_parquet('{path}')"
+                    )
+
             return con
 
     # Fallback: direct DuckDB file

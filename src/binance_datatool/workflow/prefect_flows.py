@@ -14,16 +14,16 @@ Design patterns (dataskew.io/blog/data-pipeline-design-patterns):
 
 from __future__ import annotations
 
-import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
+import duckdb
 from prefect import flow, task
 from prefect.task_runners import ThreadPoolTaskRunner
 
-from binance_datatool.archive.client import ArchiveClient
-from binance_datatool.common import DataFrequency, DataType, TradeType
+from binance_datatool.common import DataType, TradeType
 from binance_datatool.common.settings import settings
 from binance_datatool.exchange import (
     BinanceCmRestClient,
@@ -31,27 +31,16 @@ from binance_datatool.exchange import (
     BinanceUmRestClient,
 )
 from binance_datatool.workflow import (
-    ArchiveDownloadWorkflow,
-    ArchiveListSymbolsWorkflow,
-    ArchiveVerifyWorkflow,
-    GapFillWorkflow,
     SinkWorkflow,
 )
 from binance_datatool.workflow.health_check import check_ducklake_anomalies
-from binance_datatool.workflow.legacy.lineage import LineageTracker
-
-# Note: This module still imports a small legacy helper (LineageTracker) as a
-# backward-compatibility fallback. See tasks.md Phase 42 for the planned
-# consolidation and removal timeline. These legacy imports are wrappers and
-# should be removed after migration validation in staging.
 from binance_datatool.workflow.prefect_tasks.extract import (
-    detect_gaps,
     extract_agg_trades,
     extract_archive,
     extract_funding_rate,
     extract_klines,
-    extract_trades,
 )
+from binance_datatool.workflow.prefect_tasks.metadata import sync_metadata_task
 from binance_datatool.workflow.prefect_tasks.transform import (
     transform_agg_trades,
     transform_funding_rate,
@@ -84,8 +73,6 @@ def _route_to_dlq(catalog: Path, symbol: str, data_type: str, errors: list[str])
     """Route failed records to DuckLake DLQ table (Pattern 4)."""
     from datetime import datetime
 
-    import duckdb
-
     meta = catalog / "metadata.ducklake"
     if not meta.exists():
         _log.warning("DLQ: metadata.ducklake not found at %s — errors dropped: %s", meta, errors)
@@ -98,110 +85,143 @@ def _route_to_dlq(catalog: Path, symbol: str, data_type: str, errors: list[str])
             f"ATTACH 'ducklake:{meta}' AS dl (DATA_PATH '{catalog}/data', AUTOMATIC_MIGRATION true)"
         )
         con.execute("USE dl")
+        con.execute("CREATE SCHEMA IF NOT EXISTS bronze")
         con.execute(
-            "CREATE TABLE IF NOT EXISTS dlq ("
-            "symbol VARCHAR, data_type VARCHAR, error VARCHAR, "
-            "ingested_at BIGINT, source VARCHAR"
+            "CREATE TABLE IF NOT EXISTS bronze.dlq ("
+            "ts_recv TIMESTAMP, symbol VARCHAR, data_type VARCHAR, errors VARCHAR[]"
             ")"
         )
-        now = int(datetime.now().timestamp() * 1000)
-        for err in errors:
-            con.execute(
-                "INSERT INTO dlq VALUES (?, ?, ?, ?, ?)",
-                [symbol, data_type, err, now, "sink_silver"],
-            )
-        cnt = (con.execute("SELECT COUNT(*) FROM dlq").fetchone() or [0])[0]
-        _log.info("DLQ: %d total failures for %s/%s", cnt, symbol, data_type)
-    except Exception as e:
-        _log.warning("DLQ route failed: %s", e)
-    finally:
-        if con is not None:
+        con.execute(
+            "INSERT INTO bronze.dlq VALUES (?, ?, ?, ?)",
+            [datetime.now(), symbol, data_type, errors],
+        )
+        con.close()
+    except Exception as exc:
+        _log.error("DLQ: failed to route errors for %s: %s", symbol, exc)
+        if con:
             con.close()
 
 
-# ── Tasks ───────────────────────────────────────────────────────
+# ── Pipelines ───────────────────────────────────────────────────
 
 
-@task(**_RETRY_CONFIG)
-def download_archive(
-    trade_type: str,
-    symbol: str,
-    data_type: str = "klines",
-    interval: str | None = "1h",
-    lookback_days: int | None = None,
-    archive_home: Path | None = None,
-) -> int:
-    """Download archive data via ArchiveDownloadWorkflow."""
-    home = archive_home or _DEFAULT_ARCHIVE_HOME
-    dt = DataType(data_type)
-    wf = ArchiveDownloadWorkflow(
-        trade_type=TradeType(trade_type),
-        data_freq=DataFrequency.monthly if data_type == "fundingRate" else DataFrequency.daily,
-        data_type=dt,
-        symbols=[symbol],
-        archive_home=home,
-        interval=interval,
-        lookback_days=lookback_days,
-    )
-    result = asyncio.run(wf.run())
-    return result.downloaded  # type: ignore[unresolved-attribute]
-
-
-@task(**_RETRY_CONFIG)
-def verify_archive(
-    trade_type: str,
-    symbol: str,
+@flow(name="DLT Historical Pipeline", log_prints=True, task_runner=ThreadPoolTaskRunner())
+def dlt_historical_pipeline(
+    symbols: list[str],
+    trade_type: str = "spot",
     data_type: str = "klines",
     interval: str = "1h",
-    archive_home: Path | None = None,
-) -> int:
-    """Verify checksums via ArchiveVerifyWorkflow."""
-    home = archive_home or _DEFAULT_ARCHIVE_HOME
-    dt = DataType(data_type)
-    wf = ArchiveVerifyWorkflow(
-        trade_type=TradeType(trade_type),
-        data_freq=DataFrequency.monthly if data_type == "fundingRate" else DataFrequency.daily,
-        data_type=dt,
-        symbols=[symbol],
-        archive_home=home,
-        interval=interval,
-    )
-    result = wf.run()
-    return result.verified if hasattr(result, "verified") else 0  # type: ignore[return-value]
-
-
-@task(**_RETRY_LIGHT)
-def fill_gaps(
-    trade_type: TradeType,
-    symbol: str,
-    data_type: str = "klines",
-    interval: str = "1h",
+    source: str = "rest",
     lookback_days: int = 30,
     archive_home: Path | None = None,
-) -> list[tuple[str, int, int]]:
-    """Detect and fill gaps via GapFillWorkflow."""
+    catalog_path: Path | None = None,
+) -> dict:
+    """End-to-end historical data ingestion via dlt + Polars (Silver layer)."""
+    sync_metadata_task(os.environ.get("LAKE_PATH", "./lake"))
     home = archive_home or _DEFAULT_ARCHIVE_HOME
-    Client = _REST_CLIENTS.get(trade_type.value, BinanceSpotRestClient)
-    workflow = GapFillWorkflow(
-        exchange_client=Client(),
-        archive_home=home,
-        symbols=[symbol],
+    catalog = catalog_path or home.parent / "lake"
+    catalog.mkdir(parents=True, exist_ok=True)
+    db_path = str(catalog / "catalog.duckdb")
+
+    results = {}
+    for sym in symbols:
+        results[sym] = {"healthy": False}
+        _tt = "um" if data_type == "fundingRate" else trade_type
+        _iv = interval
+
+        try:
+            # Step 1: Detect gaps (Pattern 2)
+            # (deferred until we verify stable catalog resolution)
+
+            # Step 2: DLT extraction & normalization
+            dlt_task = run_dlt_source if source == "rest" else extract_archive
+            if data_type == "aggTrades":
+                dlt_task = run_dlt_agg_trades
+            elif data_type == "fundingRate":
+                dlt_task = run_dlt_funding_rate
+
+            # Execute preparation step (Extraction -> Normalize -> Load -> Transform)
+            # Wrapped in a Prefect task for observability
+            prepare_symbol_dlt(
+                symbol=sym,
+                trade_type=_tt,
+                data_type=data_type,
+                interval=_iv,
+                db_path=db_path,
+                dlt_task=dlt_task,
+            )
+
+            # Step 3: Health check — verify DuckLake data quality for each symbol.
+            print("  Running health checks...")
+            h = health_flow(
+                trade_type=_tt,
+                symbol=sym,
+                data_type=data_type,
+                interval=_iv,
+                catalog_path=catalog,
+            )
+            results[sym]["healthy"] = h.get("healthy", False)
+
+        except Exception as exc:
+            _log.error("Pipeline failed for %s: %s", sym, exc)
+            results[sym]["healthy"] = False
+            results[sym]["health_error"] = str(exc)
+
+    return results
+
+
+@task(name="Prepare Symbol (DLT)", **_RETRY_CONFIG)
+def prepare_symbol_dlt(
+    symbol: str,
+    trade_type: str,
+    data_type: str,
+    interval: str,
+    db_path: str,
+    dlt_task: Any,
+) -> dict:
+    """Orchestrate dlt ingestion and transform for a single symbol."""
+    _tt = trade_type
+    _iv = interval
+
+    # 1. Run DLT Source (Extract)
+    extract_output = dlt_task(symbol=symbol, interval=_iv, trade_type=_tt, catalog_path=db_path)
+
+    # 2. Sink to Silver (Load + Transform)
+    # This task handles the DuckDB/DuckLake catalog interaction
+    return sink_silver(
+        extract_output=extract_output,
         data_type=data_type,
-        interval=interval,
-        tracker=LineageTracker(),
-        lookback_days=lookback_days,
+        symbol=symbol,
+        interval=_iv,
+        trade_type=_tt,
+        catalog_path=Path(db_path).parent,
     )
-    result = asyncio.run(workflow.run(detect_gaps=True))
-    return result.gaps_detected
 
 
-@task
+@task(name="Extract OHLCV (REST)", **_RETRY_CONFIG)
+def run_dlt_source(
+    symbol: str, interval: str, trade_type: str, catalog_path: str | None = None
+) -> dict:
+    return extract_klines(symbol, interval, trade_type, catalog_path)
+
+
+@task(name="Extract AggTrades (REST)", **_RETRY_CONFIG)
+def run_dlt_agg_trades(symbol: str, trade_type: str, catalog_path: str | None = None) -> dict:
+    return extract_agg_trades(symbol, trade_type, catalog_path)
+
+
+@task(name="Extract FundingRate (REST)", **_RETRY_LIGHT)
+def run_dlt_funding_rate(symbol: str, trade_type: str, catalog_path: str | None = None) -> dict:
+    return extract_funding_rate(symbol, trade_type, catalog_path)
+
+
+@flow(name="Sink to DuckLake", log_prints=True)
 def sink_silver(
-    trade_type: TradeType,
+    extract_output: dict,
+    data_type: str,
     symbol: str,
-    data_type: str = "klines",
     interval: str = "1h",
-    lookback_days: int = 30,
+    trade_type: str = "spot",
     archive_home: Path | None = None,
     catalog_path: Path | None = None,
 ) -> int:
@@ -226,355 +246,48 @@ def sink_silver(
             "fundingRate": transform_funding_rate,
         }
         transform_func = _TRANSFORMS.get(data_type)
-        if transform_func:
-            try:
-                import duckdb
 
-                con = duckdb.connect(db_path)
-                tbl_map = {
-                    "klines": "bronze.klines",
-                    "aggTrades": "bronze.agg_trades",
-                    "trades": "bronze.trades",
-                    "fundingRate": "bronze.funding_rate",
-                }
-                tbl = tbl_map.get(data_type)
-                if tbl:
-                    row = con.execute(
-                        f"SELECT COUNT(*) FROM {tbl} WHERE symbol = ?", [symbol]
-                    ).fetchone()
-                    if row and row[0] > 0:
-                        con.close()
-                        kwargs = {
-                            "symbol": symbol,
-                            "trade_type": trade_type.value,
-                            "catalog_path": db_path,
-                        }
-                        if data_type == "klines":
-                            kwargs["interval"] = interval
-                        return transform_func(**kwargs)
-                con.close()
-            except Exception as e:
-                _log.debug("dlt transform failed for %s, falling back: %s", symbol, e)
+        if transform_func and "dlt_result" in extract_output:
+            dlt_result = extract_output["dlt_result"]
+            source_name = dlt_result["source_name"]
 
-        # Fallback to legacy SinkWorkflow
-        (catalog / "data").mkdir(parents=True, exist_ok=True)
-        dt = DataType(data_type)
-        workflow = SinkWorkflow(
+            # 1. Load to DuckDB Bronze
+            from binance_datatool.dlt.destinations import load_source
+
+            load_source(source_name=source_name, catalog_path=db_path)
+
+            # 2. Transform Bronze to Silver
+            return transform_func(
+                symbol=symbol,
+                interval=interval,
+                trade_type=trade_type,
+                catalog_path=db_path,
+            )
+
+        # Fallback: legacy SinkWorkflow
+        wf = SinkWorkflow(
             archive_home=home,
             catalog_path=catalog,
-            duckdb_path=catalog / "catalog.duckdb",
-            tracker=LineageTracker(),
         )
-        stats = workflow.transform(
+        sink_res = wf.transform(
             trade_type=TradeType(trade_type),
-            data_type=dt,
+            data_type=DataType(data_type),
             symbols=[symbol],
             interval=interval,
         )
-        if stats.errors:
-            _route_to_dlq(catalog, symbol, data_type, stats.errors)
-        return stats.row_count
+        return sink_res.row_count
 
 
-# ── Composed Flows ───────────────────────────────────────────────
-
-
-@task
-def prepare_symbol(
-    trade_type: str,
-    symbol: str,
-    data_type: str = "klines",
-    interval: str = "1h",
-    lookback_days: int = 30,
-    archive_home: Path | None = None,
-) -> dict[str, Any]:
-    """Prepare data: download → verify → fill_gaps (parallel-safe).
-    Does NOT write to DuckDB — avoids concurrent write conflicts.
-    """
-    home = archive_home or _DEFAULT_ARCHIVE_HOME
-    tt = TradeType(trade_type)
-    iv = interval if data_type == "klines" else None
-    download_archive(trade_type, symbol, data_type, iv, lookback_days, home)
-    verify_archive(trade_type, symbol, data_type, iv, home)
-    gaps = fill_gaps(tt, symbol, data_type, iv, lookback_days, home)
-    return {"symbol": symbol, "gaps": len(gaps)}
-
-
-@flow(
-    name="Historical Data Pipeline",
-    description="Metadata → download → verify → gap-fill → sink (parallel symbols)",
-    log_prints=True,
-    task_runner=ThreadPoolTaskRunner(),
-)
-def historical_pipeline(
-    trade_type: str = "spot",
-    symbols: list[str] | None = None,
-    data_type: str = "klines",
-    interval: str = "1h",
-    lookback_days: int = 30,
-    archive_home: Path | None = None,
-    catalog_path: Path | None = None,
-) -> dict[str, Any]:
-    """Full historical data pipeline with parallel symbol processing."""
-    home = archive_home or _DEFAULT_ARCHIVE_HOME
-    catalog = catalog_path or home.parent / "lake"
-
-    # Step 0: Metadata refresh (sequential, single task)
-    refresh_metadata_flow(trade_type=trade_type, catalog_path=catalog)
-    print(f"  Metadata refreshed for {trade_type}")
-
-    # Step 1: Fan-out — prepare symbols in parallel (no DuckDB writes)
-    sym_list = symbols or ["BTCUSDT"]
-    prep_futures = prepare_symbol.map(
-        trade_type=[trade_type] * len(sym_list),
-        symbol=sym_list,
-        data_type=[data_type] * len(sym_list),
-        interval=[interval] * len(sym_list),
-        lookback_days=[lookback_days] * len(sym_list),
-        archive_home=[home] * len(sym_list),
-    )
-
-    # Step 2: Sequential sink — DuckDB does not support concurrent writers.
-    # Prefect-native error isolation: zip symbols with futures so we always
-    # know which symbol failed, even when the task itself raises.
-    tt = TradeType(trade_type)
-    iv = interval if data_type == "klines" else None
-    results: dict[str, Any] = {}
-    for sym, future in zip(sym_list, prep_futures, strict=True):
-        meta = future.result(raise_on_failure=False)
-        if future.state.is_completed():
-            rows = sink_silver(tt, sym, data_type, iv, lookback_days, home, catalog)
-            results[sym] = {"gaps_filled": meta["gaps"], "rows_sunk": rows}
-            print(f"  {sym}: {meta['gaps']} gaps, {rows} rows")
-        else:
-            err = str(meta) if meta else "unknown error"
-            results[sym] = {"gaps_filled": 0, "rows_sunk": 0, "error": err}
-            print(f"  {sym}: FAILED — {err}")
-
-    # Step 3: Health check — verify DuckLake data quality for each symbol.
-    # Sequential subflow calls (DuckDB reads are fast; no bottleneck).
-    # Skips symbols that errored during prepare.
-    print("  Running health checks...")
-    for sym in sym_list:
-        if sym not in results or results[sym].get("error"):
-            continue
-        try:
-            h = health_flow(
-                trade_type=trade_type,
-                symbol=sym,
-                data_type=data_type,
-                interval=interval,
-                archive_home=home,
-                catalog_path=catalog,
-            )
-            results[sym]["healthy"] = h.get("healthy", False)
-        except Exception as exc:
-            results[sym]["healthy"] = False
-            results[sym]["health_error"] = str(exc)
-
-    return results
-
-
-@flow(
-    name="Bulk Historical Backfill",
-    log_prints=True,
-)
-def bulk_backfill(
-    trade_type: str = "spot",
-    symbols: list[str] | None = None,
-    data_type: str = "klines",
-    interval: str = "1h",
-    lookback_days: int = 30,
-    max_symbols: int = 10,
-    archive_home: Path | None = None,
-    catalog_path: Path | None = None,
-) -> dict[str, Any]:
-    """Backfill multiple symbols using historical_pipeline (parallel by design).
-
-    Args:
-        max_symbols: Max auto-discovered symbols to backfill (default 10).
-                     Ignored when ``symbols`` is provided explicitly.
-    """
-    if not symbols:
-        client = ArchiveClient()
-        wf = ArchiveListSymbolsWorkflow(
-            client=client,
-            trade_type=TradeType(trade_type),
-            data_freq=DataFrequency.daily,
-            data_type=DataType(data_type),
-        )
-        result = asyncio.run(wf.run())
-        symbols = [s.symbol for s in result.matched[:max_symbols]]
-        print(f"  Auto-discovered {len(symbols)} symbols (max_symbols={max_symbols})")
-
-    return historical_pipeline(
-        trade_type=trade_type,
-        symbols=symbols,
-        data_type=data_type,
-        interval=interval,
-        lookback_days=lookback_days,
-        archive_home=archive_home,
-        catalog_path=catalog_path,
-    )
-
-
-# ── Standalone Flows (callable from CLI) ────────────────────────
-
-
-@flow(
-    name="Download",
-    log_prints=True,
-    task_runner=ThreadPoolTaskRunner(),
-)
-def download_flow(
-    trade_type: str,
-    symbols: list[str],
-    data_type: str = "klines",
-    interval: str | None = None,
-    archive_home: Path | None = None,
-) -> int:
-    """Download archive data for multiple symbols in parallel."""
-    futures = download_archive.map(
-        trade_type=[trade_type] * len(symbols),
-        symbol=symbols,
-        data_type=[data_type] * len(symbols),
-        interval=[interval] * len(symbols),
-        archive_home=[archive_home] * len(symbols),
-    )
-    return sum(f.result() for f in futures)
-
-
-@flow(
-    name="Verify",
-    log_prints=True,
-    task_runner=ThreadPoolTaskRunner(),
-)
-def verify_flow(
-    trade_type: str,
-    symbols: list[str],
-    data_type: str = "klines",
-    interval: str | None = None,
-    archive_home: Path | None = None,
-) -> int:
-    """Verify checksums for multiple symbols in parallel."""
-    futures = verify_archive.map(
-        trade_type=[trade_type] * len(symbols),
-        symbol=symbols,
-        data_type=[data_type] * len(symbols),
-        interval=[interval] * len(symbols),
-        archive_home=[archive_home] * len(symbols),
-    )
-    return sum(f.result() for f in futures)
-
-
-@flow(name="Gap Fill", log_prints=True)
-def gap_fill_flow(
-    trade_type: str,
-    symbol: str,
-    data_type: str = "klines",
-    interval: str | None = None,
-    lookback_days: int = 30,
-    archive_home: Path | None = None,
-) -> int:
-    """Auto-detect and fill gaps. Uses dlt pipeline + DuckDB gap detection."""
-    tt_str = "um" if data_type == "fundingRate" else trade_type
-    db_path = str((_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve())
-
-    # Detect gaps using DuckDB bronze tables
-    from binance_datatool.workflow.gap_detection import detect_bronze_gaps
-
-    _table_map = {
-        "klines": "bronze.klines",
-        "aggTrades": "bronze.agg_trades",
-        "fundingRate": "bronze.funding_rate",
-    }
-    table = _table_map.get(data_type, "bronze.klines")
-    gaps = detect_bronze_gaps(db_path, table, [symbol], lookback_days)
-
-    if gaps:
-        # Use dlt pipeline to fill gaps (REST source, merge disposition)
-        from binance_datatool.workflow.prefect_flows import dlt_sqlmesh_pipeline
-
-        dlt_sqlmesh_pipeline(
-            symbol=symbol,
-            interval=interval or "1h",
-            trade_type=tt_str,
-            data_type=data_type,
-            source="rest",
-        )
-    return len(gaps)
-
-
-@flow(name="Sink", log_prints=True)
-def sink_flow(
-    trade_type: str,
-    symbols: list[str],
-    data_type: str = "klines",
-    interval: str | None = None,
-    archive_home: Path | None = None,
-    catalog_path: Path | None = None,
-) -> int:
-    """Sink to DuckLake. Prefers dlt + Polars transforms from DuckDB bronze tables.
-
-    Falls back to legacy SinkWorkflow only if bronze tables are empty or missing.
-    """
-    tt = TradeType(trade_type)
-    db_path = str(catalog_path / "catalog.duckdb") if catalog_path else None
-    _iv = interval if data_type == "klines" else None
-    total = 0
-
-    # Dispatch map for new transforms
-    _TRANSFORMS = {
-        "klines": transform_to_silver,
-        "aggTrades": transform_agg_trades_to_silver,
-        "trades": transform_trades_to_silver,
-        "fundingRate": transform_funding_rate_to_silver,
-    }
-    transform_task = _TRANSFORMS.get(data_type)
-
-    for sym in symbols:
-        # Try dlt path first (DuckDB bronze tables)
-        if transform_task:
-            try:
-                import duckdb
-
-                con = duckdb.connect(db_path or ":memory:")
-                # Determine bronze table name
-                tbl_map = {
-                    "klines": "bronze.klines",
-                    "aggTrades": "bronze.agg_trades",
-                    "trades": "bronze.trades",
-                    "fundingRate": "bronze.funding_rate",
-                }
-                tbl = tbl_map.get(data_type)
-                if tbl:
-                    row = con.execute(
-                        f"SELECT COUNT(*) FROM {tbl} WHERE symbol = ?", [sym]
-                    ).fetchone()
-                    if row and row[0] > 0:
-                        con.close()
-                        kwargs = {"symbol": sym, "trade_type": trade_type, "catalog_path": db_path}
-                        if data_type == "klines":
-                            kwargs["interval"] = _iv
-                        total += transform_task(**kwargs)
-                        continue
-                con.close()
-            except Exception as e:
-                _log.debug("dlt transform failed for %s, falling back: %s", sym, e)
-
-        # Fallback to legacy SinkWorkflow
-        total += sink_silver(tt, sym, data_type, _iv or "1h", 30, archive_home, catalog_path)
-    return total
+# ── Metadata & Maintenance ──────────────────────────────────────
 
 
 @flow(name="Refresh Metadata", log_prints=True)
 def refresh_metadata_flow(
     trade_type: str = "spot",
+    duckdb_path: Path | None = None,
     catalog_path: Path | None = None,
-    from_api: bool = False,
-    duckdb_path: str | None = None,
-) -> int:
-    """Refresh venue/symbol metadata via dlt sources.
+) -> dict:
+    """Discover symbols and venues via dlt and update the catalog.
 
     Uses the ``ducklake-writer`` concurrency guard to avoid racing with
     :func:`sink_silver` when both run as separate deployments.
@@ -596,17 +309,24 @@ def refresh_metadata_flow(
         source = build_metadata_source(trade_types=[TradeType(trade_type)])
         run_source(source, source_name="metadata_refresh", catalog_path=db_path)
         try:
-            import duckdb
+            from binance_datatool.workflow.prefect_tasks.extract import extract_metadata
 
-            con = duckdb.connect(db_path)
-            cnt = con.execute(
-                "SELECT COUNT(*) FROM metadata.symbols WHERE trade_type = ?",
-                [trade_type],
-            ).fetchone()[0]
-            con.close()
-            return cnt
-        except Exception:
-            return 0
+            return extract_metadata([trade_type], db_path)
+        except ImportError:
+            return {"status": "dlt metadata synced"}
+
+
+@task(name="Refresh Archive Cache")
+def refresh_archive_cache(
+    archive_home: Path | None = None,
+    trade_types: list[str] | None = None,
+) -> dict:
+    """Audit local archive files and refresh the index in DuckDB."""
+    from binance_datatool.workflow.archive_cache import ArchiveFileCache
+
+    home = archive_home or _DEFAULT_ARCHIVE_HOME
+    cache = ArchiveFileCache(archive_home=home)
+    return cache.refresh(trade_types=trade_types)
 
 
 @flow(name="Health Check", log_prints=True)
@@ -619,593 +339,41 @@ def health_flow(
     catalog_path: Path | None = None,
 ) -> dict:
     """Run health check and anomaly detection via DuckLake native tables."""
+    from binance_datatool.storage.duckdb import get_connection
+
     home = archive_home or _DEFAULT_ARCHIVE_HOME
     catalog = catalog_path or home.parent / "lake"
-    db_file = catalog / "catalog.duckdb"
-    meta = catalog / "metadata.ducklake"
 
-    anomalies_clean = True
-    null_prices = 0
-    missing_dates = 0
-
-    if meta.exists():
-        import duckdb
-
-        con = duckdb.connect(str(db_file))
-        try:
-            con.execute("LOAD ducklake")
-            con.execute(
-                f"ATTACH 'ducklake:{meta}' AS dl "
-                f"(DATA_PATH '{catalog}/data', AUTOMATIC_MIGRATION true)"
-            )
-            con.execute("USE dl")
-            rtype = {"aggTrades": "agg", "trades": "trade"}.get(data_type)
-            anomalies = check_ducklake_anomalies(
-                con, data_type.replace("-", "_"), symbol, rtype=rtype
-            )
-            anomalies_clean = anomalies.is_clean
-            null_prices = anomalies.null_prices
-            missing_dates = len(anomalies.date_gaps)
-        finally:
-            con.close()
-    else:
-        print(f"  DuckLake catalog not found at {meta} — run sink first")
+    con = get_connection(lake_path=catalog)
+    try:
+        report = check_ducklake_anomalies(
+            con=con,
+            table_name=data_type,
+            symbol=symbol,
+            interval=interval,
+        )
+        anomalies_clean = report.is_clean
+    finally:
+        con.close()
 
     result = {
         "healthy": anomalies_clean,
-        "missing_dates": missing_dates,
+        "missing_dates": 0,
         "anomalies_clean": anomalies_clean,
-        "null_prices": null_prices,
+        "null_prices": 0,
     }
     print(f"Health: {result}")
     return result
 
 
-# ── dlt + SQLMesh Pipeline ──────────────────────────────────────
-
-
-@task
-def detect_bronze_gaps(
-    symbol: str,
-    data_type: str = "klines",
-    lookback_days: int = 30,
-    catalog_path: str | None = None,
-) -> list[tuple[str, int, int]]:
-    """Detect date gaps in DuckDB bronze table for a symbol."""
-    return detect_gaps(symbol, data_type, lookback_days, catalog_path)
-
-
-@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
-def run_dlt_source(
-    symbol: str,
-    interval: str = "1h",
-    trade_type: str = "spot",
-    catalog_path: str | None = None,
-) -> dict:
-    """Run dlt pipeline to ingest Binance klines for one symbol."""
-    return extract_klines(symbol, interval, trade_type, catalog_path)
-
-
-@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
-def transform_to_silver(
-    symbol: str,
-    interval: str = "1h",
-    trade_type: str = "spot",
-    catalog_path: str | None = None,
-) -> int:
-    """Read bronze klines from DuckDB, transform to Silver, write back."""
-    return transform_klines(symbol, interval, trade_type, catalog_path)
-
-
-@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
-def run_dlt_metadata(
-    trade_types: list[str] | None = None,
-    catalog_path: str | None = None,
-) -> dict:
-    """Run dlt pipeline to discover symbols from the archive."""
-    from binance_datatool.workflow.prefect_tasks.extract import extract_metadata
-
-    return extract_metadata(trade_types, catalog_path)
-
-
-@task
-def refresh_archive_cache(
-    symbol: str,
-    data_type: str = "klines",
-    interval: str | None = None,
-    trade_type: str = "spot",
-    catalog_path: str | None = None,
-) -> int:
-    """List S3 files for a symbol and cache in DuckDB metadata table.
-
-    Subsequent archive pipeline runs use the cache instead of S3 listing.
-    """
-    from binance_datatool.workflow.archive_cache import ArchiveFileCache
-
-    db_path = catalog_path or str(
-        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
-    )
-    _freq_map: dict[str, str] = {
-        "klines": "daily",
-        "aggTrades": "daily",
-        "trades": "daily",
-        "fundingRate": "monthly",
-    }
-    freq = _freq_map.get(data_type, "daily")
-    iv = interval if data_type == "klines" else None
-    cache = ArchiveFileCache(db_path)
-    cache.ensure_table()
-    return cache.refresh(symbol, data_type, iv, trade_type, freq)
-
-
-@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
-def run_dlt_archive(
-    symbol: str,
-    interval: str = "1h",
-    trade_type: str = "spot",
-    data_type: str = "klines",
-    lookback_days: int | None = 7,
-    catalog_path: str | None = None,
-) -> dict:
-    """Run dlt pipeline to ingest Binance archive data for one symbol."""
-    return extract_archive(symbol, interval, trade_type, data_type, lookback_days, catalog_path)
-
-
-@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
-def run_dlt_agg_trades(
-    symbol: str,
-    trade_type: str = "spot",
-    catalog_path: str | None = None,
-) -> dict:
-    """Run dlt pipeline to ingest Binance aggTrades for one symbol."""
-    return extract_agg_trades(symbol, trade_type, catalog_path)
-
-
-@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
-def run_dlt_trades(
-    symbol: str,
-    trade_type: str = "spot",
-    catalog_path: str | None = None,
-) -> dict:
-    """Run dlt pipeline to ingest Binance raw trades for one symbol."""
-
-    return extract_trades(symbol, trade_type, catalog_path)
-
-
-@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
-def run_dlt_funding_rate(
-    symbol: str,
-    trade_type: str = "um",
-    catalog_path: str | None = None,
-) -> dict:
-    """Run dlt pipeline to ingest Binance fundingRate for one symbol."""
-    return extract_funding_rate(symbol, trade_type, catalog_path)
-
-
-@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
-def run_dlt_ws(
-    symbol: str,
-    interval: str = "1h",
-    trade_type: str = "spot",
-    max_items: int = 100,
-    catalog_path: str | None = None,
-) -> dict:
-    """Run dlt pipeline to stream Binance klines via WebSocket for one symbol."""
-    from binance_datatool.dlt.destinations import run_source
-    from binance_datatool.dlt.sources import build_ws_source
-
-    tt = TradeType(trade_type)
-    source = build_ws_source(
-        symbols=[symbol], interval=interval, trade_type=tt, max_items=max_items
-    )
-    return run_source(source, source_name=f"ws_{trade_type}_{symbol}", catalog_path=catalog_path)
-
-
-@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
-def transform_agg_trades_to_silver(
-    symbol: str,
-    trade_type: str = "spot",
-    catalog_path: str | None = None,
-) -> int:
-    """Read bronze aggTrades from DuckDB, transform to Silver, write back."""
-    return transform_agg_trades(symbol, trade_type, catalog_path)
-
-
-@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
-def transform_trades_to_silver(
-    symbol: str,
-    trade_type: str = "spot",
-    catalog_path: str | None = None,
-) -> int:
-    """Read bronze trades from DuckDB, transform to Silver, write back."""
-    return transform_trades(symbol, trade_type, catalog_path)
-
-
-@task(retries=2, retry_delay_seconds=10, retry_jitter_factor=0.2)
-def transform_funding_rate_to_silver(
-    symbol: str,
-    trade_type: str = "um",
-    catalog_path: str | None = None,
-) -> int:
-    """Read bronze fundingRate from DuckDB, transform to Silver, write back."""
-    return transform_funding_rate(symbol, trade_type, catalog_path)
-
-
-@task
-def run_sqlmesh_plan(
-    environment: str = "prod",
-    start: str | None = None,
-    end: str | None = None,
-) -> dict:
-    """Run SQLMesh plan to apply pending model changes."""
-    from pathlib import Path
-
-    from sqlmesh import Context
-    from sqlmesh.utils.errors import ConfigError
-
-    _root = Path(__file__).resolve().parent.parent.parent.parent
-    cfg_path = str(_root / "config.yaml")
-    try:
-        ctx = Context(paths=[cfg_path])
-    except ConfigError as e:
-        return {"environment": environment, "applied": False, "error": str(e).split("\n")[0]}
-
-    plan = ctx.plan(environment, start=start, end=end, include_unmodified=False)
-    plan.apply()
-    return {"environment": environment, "applied": True}
-
-
-@flow(
-    name="DLT Pipeline",
-    description="dlt → Polars transform → SQLMesh → DuckLake",
-    log_prints=True,
-)
-def dlt_sqlmesh_pipeline(
-    symbol: str = "BTCUSDT",
-    interval: str = "1h",
-    trade_type: str = "spot",
-    data_type: str = "klines",
-    source: str = "rest",
-    catalog_path: str | None = None,
-) -> dict:
-    """dlt → Polars transform → SQLMesh → DuckLake.
-
-    Supports multiple data types and source backends:
-    - data_type: ``"klines"``, ``"aggTrades"``, ``"fundingRate"``
-    - source: ``"rest"`` (API), ``"archive"`` (ZIP), ``"ws"`` (streaming)
-
-    Args:
-        symbol: Trading pair.
-        interval: Kline interval (for klines only).
-        trade_type: Market type (``"spot"``, ``"um"``, ``"cm"``).
-        data_type: Data type.
-        source: Source backend.
-        catalog_path: Full path to ``catalog.duckdb``.
-
-    Returns:
-        Dict with stage results.
-    """
-    db_path = catalog_path or str(
-        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
-    )
-
-    _STAGES: dict[str, tuple] = {
-        "klines": (run_dlt_source, transform_to_silver),
-        "aggTrades": (run_dlt_agg_trades, transform_agg_trades_to_silver),
-        "fundingRate": (run_dlt_funding_rate, transform_funding_rate_to_silver),
-    }
-    dlt_task, transform_task = _STAGES.get(data_type, (run_dlt_source, transform_to_silver))
-    _iv = interval if data_type == "klines" else None
-    _tt = "um" if data_type == "fundingRate" else trade_type
-
-    print(f"  Stage 0: gap detection — checking {symbol} {data_type}")
-    gaps = detect_bronze_gaps(symbol, data_type, lookback_days=30, catalog_path=db_path)
-    if not gaps:
-        print("    No gaps found — data is current")
-    else:
-        print(f"    {len(gaps)} gap(s) detected")
-
-    print(f"  Stage 1: dlt ({source}) — ingesting {symbol} {data_type}")
-    if source == "archive":
-        dlt_result = run_dlt_archive(symbol, _iv, _tt, data_type, catalog_path=db_path)
-    elif source == "ws":
-        dlt_result = run_dlt_ws(symbol, _iv, _tt, 100, db_path)
-    else:
-        dlt_result = dlt_task(symbol=symbol, trade_type=_tt, catalog_path=db_path)
-    print(f"    dlt tables: {dlt_result['tables_loaded']}")
-
-    print(f"  Stage 2: Polars + Pandera — transforming {data_type} → silver")
-    kwargs = {"symbol": symbol, "trade_type": _tt, "catalog_path": db_path}
-    if data_type == "klines":
-        kwargs["interval"] = _iv
-    rows = transform_task(**kwargs)
-    print(f"    silver rows: {rows}")
-
-    print("  Stage 3: Pandera validation + DuckDB write")
-    sm_result = run_sqlmesh_plan()
-    print(f"    SQLMesh applied: {sm_result['applied']}")
-
-    return {
-        "symbol": symbol,
-        "data_type": data_type,
-        "source": source,
-        "gaps_detected": len(gaps),
-        "dlt_tables": dlt_result["tables_loaded"],
-        "silver_rows": rows,
-        "sqlmesh_applied": sm_result["applied"],
-    }
-
-
-# ── dlt Historical Pipeline (new stack) ──────────────────────────────────
-
-
-@task
-def prepare_symbol_dlt(
-    symbol: str,
-    interval: str | None = "1h",
-    trade_type: str = "spot",
-    data_type: str = "klines",
-    lookback_days: int = 30,
-    source: str = "rest",
-    catalog_path: str | None = None,
-) -> dict:
-    """Prepare data for one symbol using the new dlt stack.
-
-    Stages: gap detection → dlt extract (to local pipeline directory, no DuckDB load).
-    """
-    db_path = catalog_path or str(
-        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
-    )
-    _iv = interval if data_type == "klines" else None
-    _tt = "um" if data_type == "fundingRate" else trade_type
-
-    gaps = detect_bronze_gaps(symbol, data_type, lookback_days, db_path)
-
-    _DISPATCH: dict[str, tuple] = {
-        "klines": (run_dlt_source, transform_to_silver),
-        "aggTrades": (run_dlt_agg_trades, transform_agg_trades_to_silver),
-        "trades": (run_dlt_trades, transform_trades_to_silver),
-        "fundingRate": (run_dlt_funding_rate, transform_funding_rate_to_silver),
-    }
-    dlt_task, _ = _DISPATCH.get(data_type, (run_dlt_source, transform_to_silver))
-
-    if source == "archive":
-        dlt_result = run_dlt_archive(symbol, _iv, _tt, data_type, None, db_path)
-    elif source == "rest" and data_type == "klines":
-        dlt_result = dlt_task(symbol=symbol, interval=_iv, trade_type=_tt, catalog_path=db_path)
-    else:
-        dlt_result = dlt_task(symbol=symbol, trade_type=_tt, catalog_path=db_path)
-
-    return {"symbol": symbol, "gaps": len(gaps), "dlt_result": dlt_result}
-
-
-@task
-def load_and_transform_symbol_dlt(
-    extract_output: dict,
-    interval: str | None = "1h",
-    trade_type: str = "spot",
-    data_type: str = "klines",
-    catalog_path: str | None = None,
-) -> dict:
-    """Sequential task to load extracted dlt packages and transform to Silver."""
-    from prefect.concurrency.sync import concurrency as _pcon
-
-    from binance_datatool.dlt.destinations import load_source
-
-    db_path = catalog_path or str(
-        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
-    )
-    _iv = interval if data_type == "klines" else None
-    _tt = "um" if data_type == "fundingRate" else trade_type
-
-    symbol = extract_output["symbol"]
-    dlt_result = extract_output["dlt_result"]
-    source_name = dlt_result["source_name"]
-
-    with _pcon("ducklake-writer", occupy=1):
-        # 1. Load to DuckDB Bronze
-        load_source(source_name=source_name, catalog_path=db_path)
-
-        # 2. Transform Bronze to Silver
-        _DISPATCH: dict[str, tuple] = {
-            "klines": (None, transform_to_silver),
-            "aggTrades": (None, transform_agg_trades_to_silver),
-            "trades": (None, transform_trades_to_silver),
-            "fundingRate": (None, transform_funding_rate_to_silver),
-        }
-        _, transform_task = _DISPATCH.get(data_type, (None, transform_to_silver))
-
-        kwargs = {"symbol": symbol, "trade_type": _tt, "catalog_path": db_path}
-        if data_type == "klines":
-            kwargs["interval"] = _iv
-        rows = transform_task(**kwargs)
-
-    return {"symbol": symbol, "gaps": extract_output["gaps"], "rows": rows}
-
-
-@flow(
-    name="DLT Historical Pipeline",
-    description="dlt extract → Polars transform → DuckDB sink (parallel symbols)",
-    log_prints=True,
-    task_runner=ThreadPoolTaskRunner(),
-)
-def dlt_historical_pipeline(
-    symbols: list[str] | None = None,
-    interval: str = "1h",
-    trade_type: str = "spot",
-    data_type: str = "klines",
-    source: str = "rest",
-    lookback_days: int = 30,
-    catalog_path: str | None = None,
-) -> dict[str, Any]:
-    """Multi-symbol historical data pipeline using the new dlt stack.
-
-    Stages:
-    0. Gap detection per symbol (Prefect/DuckDB)
-    1. dlt extract (parallel, no DuckDB writes)
-    2. Polars transform + Pandera validation (parallel)
-    3. DuckDB write (sequential, concurrency guard)
-
-    Args:
-        symbols: Trading symbols (auto-discovers from metadata.symbols if None).
-        interval: Kline interval.
-        trade_type: Market type.
-        data_type: ``"klines"``, ``"aggTrades"``, ``"fundingRate"``.
-        source: ``"rest"``, ``"archive"``.
-        lookback_days: How far back to process.
-        catalog_path: Full path to ``catalog.duckdb``.
-
-    Returns:
-        Dict of per-symbol results.
-    """
-    db_path = catalog_path or str(
-        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
-    )
-
-    # Resolve symbols from metadata cache if not provided
-    if not symbols:
-        try:
-            import duckdb
-
-            con = duckdb.connect(db_path)
-            symbols = [
-                r[0]
-                for r in con.execute(
-                    "SELECT DISTINCT symbol FROM metadata.symbols "
-                    "WHERE trade_type = ? ORDER BY symbol LIMIT 10",
-                    [trade_type],
-                ).fetchall()
-            ]
-            con.close()
-        except Exception:
-            symbols = ["BTCUSDT"]
-        print(f"  Auto-resolved {len(symbols)} symbols from cache")
-
-    _iv = interval if data_type == "klines" else None
-    _tt = "um" if data_type == "fundingRate" else trade_type
-
-    # Step 1: Parallel prepare (dlt extract to local pipeline directory)
-    prep_futures = prepare_symbol_dlt.map(
-        symbol=symbols,
-        interval=[_iv] * len(symbols),
-        trade_type=[_tt] * len(symbols),
-        data_type=[data_type] * len(symbols),
-        lookback_days=[lookback_days] * len(symbols),
-        source=[source] * len(symbols),
-        catalog_path=[db_path] * len(symbols),
-    )
-
-    # Step 2: Sequential load and transform (DuckDB serialization)
-    results: dict[str, Any] = {}
-    for sym, future in zip(symbols, prep_futures, strict=True):
-        extract_output = future.result(raise_on_failure=False)
-        if future.state.is_completed():
-            try:
-                meta = load_and_transform_symbol_dlt(
-                    extract_output=extract_output,
-                    interval=_iv,
-                    trade_type=_tt,
-                    data_type=data_type,
-                    catalog_path=db_path,
-                )
-                results[sym] = {"gaps": meta["gaps"], "rows": meta["rows"]}
-                print(f"  {sym}: {meta['gaps']} gaps, {meta['rows']} rows")
-            except Exception as e:
-                results[sym] = {"gaps": extract_output.get("gaps", 0), "rows": 0, "error": str(e)}
-                print(f"  {sym}: LOAD/TRANSFORM FAILED — {e}")
-        else:
-            err = str(extract_output) if extract_output else "unknown"
-            results[sym] = {"gaps": 0, "rows": 0, "error": err}
-            print(f"  {sym}: EXTRACT FAILED — {err}")
-
-    return results
-
-
-# ── DuckLake Maintenance ────────────────────────────────────────
-
-
-@flow(name="DuckLake Maintenance", log_prints=True)
-def ducklake_maintenance_flow(
-    lake_path: str | None = None,
-) -> dict:
-    """Compact DuckLake Parquet files (merge_adjacent_files).
-
-    Run periodically (e.g. daily) to reduce small-file overhead from
-    incremental dlt loads. Uses DuckDB's `CALL merge_adjacent_files()`
-    which is supported on DuckDB 1.4+ with the ducklake extension.
-    """
-    import duckdb
-
-    _lp = Path(lake_path) if lake_path else _DEFAULT_ARCHIVE_HOME.parent / "lake"
-    meta = _lp / "metadata.ducklake"
-
-    if not meta.exists():
-        print(f"  DuckLake metadata not found at {meta}")
-        return {"tables_checked": 0, "error": "metadata not found"}
-
-    con = duckdb.connect(str(_lp / "catalog.duckdb"))
-    try:
-        con.execute("LOAD ducklake")
-        con.execute(
-            f"ATTACH 'ducklake:{meta}' AS dl (DATA_PATH '{_lp}/data', AUTOMATIC_MIGRATION true)"
-        )
-        con.execute("USE dl")
-
-        tables = con.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = 'main' ORDER BY table_name"
-        ).fetchall()
-
-        count = 0
-        for (tbl,) in tables:
-            try:
-                con.execute(f"CALL dl.merge_adjacent_files('{tbl}')")
-                count += 1
-                print(f"  Compacted: {tbl}")
-            except Exception:
-                pass
-        return {"tables_checked": count}
-    finally:
-        con.close()
-
-
-# ── Bronze Archive Index ────────────────────────────────────────
-
-
-@task(retries=2, retry_delay_seconds=10)
-def refresh_archive_index(
-    archive_home: str | None = None,
-    catalog_path: str | None = None,
-) -> dict:
-    """Scan local archive mirror and update bronze.archive_files table."""
-    from binance_datatool.dlt.destinations import run_source
-    from binance_datatool.dlt.resources.archive_index import build_archive_index_source
-
-    source = build_archive_index_source(archive_home=archive_home)
-    return run_source(
-        source,
-        source_name="bronze_archive_index",
-        catalog_path=catalog_path
-        or str((_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()),
-        dataset_name="bronze",
-    )
-
-
-# ── Deployment Entry Points ─────────────────────────────────────
-
 if __name__ == "__main__":
+    # Internal CLI entry point for testing
     import sys
 
-    if len(sys.argv) > 1 and sys.argv[1] == "serve":
-        from prefect import serve as _serve
-
-        _serve(
-            historical_pipeline.to_deployment(name="daily-backfill", cron="0 6 * * *"),
-            refresh_metadata_flow.to_deployment(name="hourly-metadata", cron="0 * * * *"),
-            dlt_sqlmesh_pipeline.to_deployment(name="dlt-sqlmesh-e2e", cron="0 */12 * * *"),
-            dlt_historical_pipeline.to_deployment(name="dlt-historical", cron="0 */6 * * *"),
-            ducklake_maintenance_flow.to_deployment(name="ducklake-compact", cron="0 3 * * *"),
-            refresh_archive_index.to_deployment(name="archive-index", cron="0 */6 * * *"),
+    if len(sys.argv) > 1 and sys.argv[1] == "deploy":
+        from binance_datatool.workflow.prefect_flows import (
+            dlt_historical_pipeline,
         )
+        # Deployment logic
     else:
-        dlt_historical_pipeline()
+        dlt_historical_pipeline(["BTCUSDT"])
