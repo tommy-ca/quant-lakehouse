@@ -15,6 +15,7 @@ Each test does full round-trip validation:
 from __future__ import annotations
 
 import asyncio
+import sys
 import tempfile
 from datetime import date
 from pathlib import Path
@@ -24,7 +25,7 @@ import duckdb
 import pytest
 
 from binance_datatool.common.enums import DataFrequency, DataType, TradeType, exchange_for
-from binance_datatool.dlt.destinations import run_source
+from binance_datatool.dlt.destinations import load_source, run_source
 from binance_datatool.dlt.resources.binance_archive import archive_data_resource
 from binance_datatool.dlt.sources import build_binance_source, build_rest_source
 from binance_datatool.storage.duckdb import get_connection, write_silver_table
@@ -40,6 +41,12 @@ def _run_pipeline(source, source_name: str, catalog_path: str) -> duckdb.DuckDBP
     """Run a dlt source and return a DuckDB connection to the catalog."""
     run_source(
         source,
+        source_name=source_name,
+        catalog_path=catalog_path,
+        dataset_name="bronze",
+        destination="duckdb",
+    )
+    load_source(
         source_name=source_name,
         catalog_path=catalog_path,
         dataset_name="bronze",
@@ -209,6 +216,7 @@ class TestRestKlinesCorrectness:
     @pytest.mark.parametrize("trade_type", [TradeType.spot, TradeType.um])
     def test_field_mappings(self, trade_type: TradeType, tmp_path: Path) -> None:
         db = str(tmp_path / "catalog.duckdb")
+        print(f"DEBUG_DB_PATH:{db}", file=sys.stderr)
         con = _run_pipeline(
             build_binance_source(["BTCUSDT"], "1h", trade_type, "klines"),
             f"e2e_rk_{trade_type.value}",
@@ -272,6 +280,7 @@ class TestRestAggTradesCorrectness:
     @pytest.mark.parametrize("trade_type", [TradeType.spot, TradeType.um])
     def test_field_mappings(self, trade_type: TradeType, tmp_path: Path) -> None:
         db = str(tmp_path / "catalog.duckdb")
+        print(f"DEBUG_DB_PATH:{db}", file=sys.stderr)
         con = _run_pipeline(
             build_rest_source(["BTCUSDT"], "aggTrades", trade_type),
             f"e2e_at_{trade_type.value}",
@@ -334,6 +343,7 @@ class TestRestFundingRateCorrectness:
     )
     def test_field_mappings(self, trade_type: TradeType, symbol: str, tmp_path: Path) -> None:
         db = str(tmp_path / "catalog.duckdb")
+        print(f"DEBUG_DB_PATH:{db}", file=sys.stderr)
         con = _run_pipeline(
             build_rest_source([symbol], "fundingRate", trade_type),
             f"e2e_fr_{trade_type.value}",
@@ -394,6 +404,7 @@ class TestArchiveKlinesCorrectness:
             pytest.skip(f"No archive files available for {symbol} 1d klines {trade_type.value}")
 
         db = str(tmp_path / "catalog.duckdb")
+        print(f"DEBUG_DB_PATH:{db}", file=sys.stderr)
         resource = archive_data_resource(
             symbol, [f.key for f in recent], interval="1d", data_type="klines"
         )
@@ -481,6 +492,7 @@ class TestArchiveAggTradesCorrectness:
             pytest.skip(f"No archive files for {symbol} aggTrades {trade_type.value}")
 
         db = str(tmp_path / "catalog.duckdb")
+        print(f"DEBUG_DB_PATH:{db}", file=sys.stderr)
         resource = archive_data_resource(symbol, [f.key for f in recent], data_type="aggTrades")
         con = _run_pipeline(resource, f"e2e_aat_{trade_type.value}", db)
 
@@ -553,6 +565,7 @@ class TestArchiveFundingRateCorrectness:
             pytest.skip(f"No archive files for {symbol} fundingRate {trade_type.value}")
 
         db = str(tmp_path / "catalog.duckdb")
+        print(f"DEBUG_DB_PATH:{db}", file=sys.stderr)
         resource = archive_data_resource(symbol, [f.key for f in recent], data_type="fundingRate")
         con = _run_pipeline(resource, f"e2e_afr_{trade_type.value}", db)
 
@@ -623,6 +636,7 @@ class TestArchiveIndexKlinesCorrectness:
             pytest.skip(f"No archive files for {data_type}")
 
         db = str(tmp_path / "catalog.duckdb")
+        print(f"DEBUG_DB_PATH:{db}", file=sys.stderr)
         resource = archive_data_resource(
             "BTCUSDT", [f.key for f in recent], interval=interval, data_type=data_type
         )
@@ -713,6 +727,7 @@ class TestArchiveTradesCorrectness:
             pytest.skip("No archive files for trades")
 
         db = str(tmp_path / "catalog.duckdb")
+        print(f"DEBUG_DB_PATH:{db}", file=sys.stderr)
         resource = archive_data_resource("BTCUSDT", [f.key for f in recent], data_type="trades")
         con = _run_pipeline(resource, "e2e_trades", db)
 
@@ -770,6 +785,7 @@ class TestArchiveBookDepthCorrectness:
             pytest.skip("No archive files for bookDepth")
 
         db = str(tmp_path / "catalog.duckdb")
+        print(f"DEBUG_DB_PATH:{db}", file=sys.stderr)
         resource = archive_data_resource("BTCUSDT", [f.key for f in recent], data_type="bookDepth")
         con = _run_pipeline(resource, "e2e_bookdepth", db)
 
@@ -814,6 +830,7 @@ class TestArchiveMetricsCorrectness:
             pytest.skip("No archive files for metrics")
 
         db = str(tmp_path / "catalog.duckdb")
+        print(f"DEBUG_DB_PATH:{db}", file=sys.stderr)
         resource = archive_data_resource("BTCUSDT", [f.key for f in recent], data_type="metrics")
         con = _run_pipeline(resource, "e2e_metrics", db)
 
