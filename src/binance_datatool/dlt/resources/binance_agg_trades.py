@@ -5,11 +5,11 @@ Canonical location. Previously at ``dlt_sources.binance_rest``.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import dlt  # noqa: TC002 — our dlt package shadows the module name
 
+from binance_datatool.common.async_utils import sync_run
 from binance_datatool.common.enums import TradeType
 from binance_datatool.dlt.models import RawAggTradeModel
 from binance_datatool.dlt.resources._client import client_for
@@ -43,7 +43,7 @@ def agg_trades_resource(
         List of aggTrade dicts (all values as strings).
     """
     client = client_for(trade_type)
-    raw_data = asyncio.run(
+    raw_data = sync_run(
         client.fetch_agg_trades(
             symbol=symbol,
             since=start_time or 0,

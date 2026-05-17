@@ -5,11 +5,11 @@ This is the canonical location. Previously at ``dlt_sources.binance``.
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Any
 
 import dlt  # noqa: TC002 — our dlt package shadows the module name
 
+from binance_datatool.common.async_utils import sync_run
 from binance_datatool.common.enums import TradeType
 from binance_datatool.dlt.models import RawKlineModel
 from binance_datatool.dlt.resources._client import client_for
@@ -47,7 +47,7 @@ def klines_resource(
         List of kline dicts with fields matching RawKlineModel schema.
     """
     client = client_for(trade_type)
-    raw_data: list[KlineData] = asyncio.run(
+    raw_data: list[KlineData] = sync_run(
         client.fetch_ohlcv(
             symbol=symbol,
             interval=interval,

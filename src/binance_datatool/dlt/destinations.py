@@ -80,7 +80,7 @@ def run_source(
     destination: str = "ducklake",
     lake_path: str | None = None,
 ) -> dict:
-    """Run a dlt source and return load info.
+    """Extract a dlt source to local storage without loading to the database.
 
     Args:
         source: A dlt source or resource.
@@ -91,16 +91,42 @@ def run_source(
         lake_path: DuckLake storage path (ignored for ``"duckdb"``).
 
     Returns:
-        Dict with ``load_info``, ``dataset_name``, and ``tables_loaded``.
+        Dict with ``source_name``, ``dataset_name``, and ``tables_loaded``.
     """
     pipeline = build_pipeline(source_name, catalog_path, dataset_name, destination, lake_path)
-    load_info = pipeline.run(source)
+    extract_info = pipeline.extract(source)
     schema = pipeline.default_schema
     tables_loaded: list[str] = []
     if schema:
         tables_loaded = [t["name"] for t in schema.data_tables()]
     return {
-        "load_info": str(load_info),
+        "extract_info": str(extract_info),
+        "source_name": source_name,
         "dataset_name": dataset_name,
         "tables_loaded": tables_loaded,
     }
+
+
+def load_source(
+    source_name: str = "binance_spot",
+    catalog_path: str | None = None,
+    dataset_name: str = "bronze",
+    destination: str = "ducklake",
+    lake_path: str | None = None,
+) -> dict:
+    """Normalize and load previously extracted data into the destination.
+
+    Args:
+        source_name: Pipeline name.
+        catalog_path: Path to ``catalog.duckdb`` (DuckDB destination only).
+        dataset_name: dlt dataset schema name.
+        destination: ``"ducklake"`` (default) or ``"duckdb"``.
+        lake_path: DuckLake storage path (ignored for ``"duckdb"``).
+
+    Returns:
+        Dict with ``load_info``.
+    """
+    pipeline = build_pipeline(source_name, catalog_path, dataset_name, destination, lake_path)
+    pipeline.normalize()
+    load_info = pipeline.load()
+    return {"load_info": str(load_info)}

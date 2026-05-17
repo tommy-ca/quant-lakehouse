@@ -17,6 +17,7 @@ from typing import Any
 import dlt
 
 from binance_datatool.archive.client import ArchiveClient
+from binance_datatool.common.async_utils import sync_run
 from binance_datatool.common.enums import DataFrequency, DataType, TradeType
 from binance_datatool.dlt.models import SymbolMetaModel, VenueModel
 from binance_datatool.workflow.list_symbols import ArchiveListSymbolsWorkflow
@@ -84,8 +85,6 @@ def symbols_resource(
     if trade_types is None:
         trade_types = ALL_TRADE_TYPES
 
-    import asyncio
-
     client = ArchiveClient()
     dt_enum = DataType(data_type)
     now_ms = int(datetime.now(UTC).timestamp() * 1000)
@@ -98,7 +97,7 @@ def symbols_resource(
             data_freq=DataFrequency.daily,
             data_type=dt_enum,
         )
-        result = asyncio.run(wf.run())
+        result = sync_run(wf.run())
         for entry in result.matched:
             all_symbols.append(
                 {

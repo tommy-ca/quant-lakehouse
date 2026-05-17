@@ -5,11 +5,11 @@ Canonical location. Previously at ``dlt_sources.binance_ws``.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import dlt  # noqa: TC002 — our dlt package shadows the module name
 
+from binance_datatool.common.async_utils import sync_run
 from binance_datatool.common.enums import TradeType
 
 
@@ -92,4 +92,4 @@ def ws_klines_resource(
         await ws_client.close()
         return results
 
-    return asyncio.run(_collect())
+    return sync_run(_collect())

@@ -10,7 +10,7 @@ Sub-modules:
 - ``sources`` — ``@dlt.source`` composing all resources
 """
 
-from binance_datatool.dlt.destinations import build_pipeline, run_source
+from binance_datatool.dlt.destinations import build_pipeline, load_source, run_source
 from binance_datatool.dlt.models import (
     AggTradeModel,
     FundingRateModel,
@@ -39,6 +39,7 @@ from binance_datatool.dlt.sources import build_binance_source, build_rest_source
 
 __all__ = [
     "build_pipeline",
+    "load_source",
     "run_source",
     "KlineModel",
     "AggTradeModel",

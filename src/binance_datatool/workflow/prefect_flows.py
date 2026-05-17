@@ -951,8 +951,7 @@ def prepare_symbol_dlt(
 ) -> dict:
     """Prepare data for one symbol using the new dlt stack.
 
-    Stages: gap detection → dlt extract → Polars transform → DuckDB write.
-    No legacy download/verify/sink — uses dlt + Polars + Pandera.
+    Stages: gap detection → dlt extract (to local pipeline directory, no DuckDB load).
     """
     db_path = catalog_path or str(
         (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
@@ -968,21 +967,60 @@ def prepare_symbol_dlt(
         "trades": (run_dlt_trades, transform_trades_to_silver),
         "fundingRate": (run_dlt_funding_rate, transform_funding_rate_to_silver),
     }
-    dlt_task, transform_task = _DISPATCH.get(data_type, (run_dlt_source, transform_to_silver))
+    dlt_task, _ = _DISPATCH.get(data_type, (run_dlt_source, transform_to_silver))
 
     if source == "archive":
-        run_dlt_archive(symbol, _iv, _tt, data_type, None, db_path)
+        dlt_result = run_dlt_archive(symbol, _iv, _tt, data_type, None, db_path)
     elif source == "rest" and data_type == "klines":
-        dlt_task(symbol=symbol, interval=_iv, trade_type=_tt, catalog_path=db_path)
+        dlt_result = dlt_task(symbol=symbol, interval=_iv, trade_type=_tt, catalog_path=db_path)
     else:
-        dlt_task(symbol=symbol, trade_type=_tt, catalog_path=db_path)
+        dlt_result = dlt_task(symbol=symbol, trade_type=_tt, catalog_path=db_path)
 
-    kwargs = {"symbol": symbol, "trade_type": _tt, "catalog_path": db_path}
-    if data_type == "klines":
-        kwargs["interval"] = _iv
-    rows = transform_task(**kwargs)
+    return {"symbol": symbol, "gaps": len(gaps), "dlt_result": dlt_result}
 
-    return {"symbol": symbol, "gaps": len(gaps), "rows": rows}
+
+@task
+def load_and_transform_symbol_dlt(
+    extract_output: dict,
+    interval: str | None = "1h",
+    trade_type: str = "spot",
+    data_type: str = "klines",
+    catalog_path: str | None = None,
+) -> dict:
+    """Sequential task to load extracted dlt packages and transform to Silver."""
+    from prefect.concurrency.sync import concurrency as _pcon
+
+    from binance_datatool.dlt.destinations import load_source
+
+    db_path = catalog_path or str(
+        (_DEFAULT_ARCHIVE_HOME.parent / "lake" / "catalog.duckdb").resolve()
+    )
+    _iv = interval if data_type == "klines" else None
+    _tt = "um" if data_type == "fundingRate" else trade_type
+
+    symbol = extract_output["symbol"]
+    dlt_result = extract_output["dlt_result"]
+    source_name = dlt_result["source_name"]
+
+    with _pcon("ducklake-writer", occupy=1):
+        # 1. Load to DuckDB Bronze
+        load_source(source_name=source_name, catalog_path=db_path)
+
+        # 2. Transform Bronze to Silver
+        _DISPATCH: dict[str, tuple] = {
+            "klines": (None, transform_to_silver),
+            "aggTrades": (None, transform_agg_trades_to_silver),
+            "trades": (None, transform_trades_to_silver),
+            "fundingRate": (None, transform_funding_rate_to_silver),
+        }
+        _, transform_task = _DISPATCH.get(data_type, (None, transform_to_silver))
+
+        kwargs = {"symbol": symbol, "trade_type": _tt, "catalog_path": db_path}
+        if data_type == "klines":
+            kwargs["interval"] = _iv
+        rows = transform_task(**kwargs)
+
+    return {"symbol": symbol, "gaps": extract_output["gaps"], "rows": rows}
 
 
 @flow(
@@ -1046,7 +1084,7 @@ def dlt_historical_pipeline(
     _iv = interval if data_type == "klines" else None
     _tt = "um" if data_type == "fundingRate" else trade_type
 
-    # Step 1: Parallel prepare (dlt + transform, no DuckDB contention)
+    # Step 1: Parallel prepare (dlt extract to local pipeline directory)
     prep_futures = prepare_symbol_dlt.map(
         symbol=symbols,
         interval=[_iv] * len(symbols),
@@ -1057,16 +1095,28 @@ def dlt_historical_pipeline(
         catalog_path=[db_path] * len(symbols),
     )
 
-    # Step 2: Sequential health check
+    # Step 2: Sequential load and transform (DuckDB serialization)
     results: dict[str, Any] = {}
     for sym, future in zip(symbols, prep_futures, strict=True):
-        meta = future.result(raise_on_failure=False)
+        extract_output = future.result(raise_on_failure=False)
         if future.state.is_completed():
-            results[sym] = {"gaps": meta["gaps"], "rows": meta["rows"]}
-            print(f"  {sym}: {meta['gaps']} gaps, {meta['rows']} rows")
+            try:
+                meta = load_and_transform_symbol_dlt(
+                    extract_output=extract_output,
+                    interval=_iv,
+                    trade_type=_tt,
+                    data_type=data_type,
+                    catalog_path=db_path,
+                )
+                results[sym] = {"gaps": meta["gaps"], "rows": meta["rows"]}
+                print(f"  {sym}: {meta['gaps']} gaps, {meta['rows']} rows")
+            except Exception as e:
+                results[sym] = {"gaps": extract_output.get("gaps", 0), "rows": 0, "error": str(e)}
+                print(f"  {sym}: LOAD/TRANSFORM FAILED — {e}")
         else:
-            results[sym] = {"gaps": 0, "rows": 0, "error": str(meta) if meta else "unknown"}
-            print(f"  {sym}: FAILED")
+            err = str(extract_output) if extract_output else "unknown"
+            results[sym] = {"gaps": 0, "rows": 0, "error": err}
+            print(f"  {sym}: EXTRACT FAILED — {err}")
 
     return results
 

@@ -13,6 +13,7 @@ from typing import Any
 
 import dlt  # noqa: TC002 — our dlt package shadows the module name
 
+from binance_datatool.common.async_utils import sync_run
 from binance_datatool.common.constants import S3_DOWNLOAD_PREFIX
 
 _KLINES_TYPES = {"klines", "indexPriceKlines", "markPriceKlines", "premiumIndexKlines"}
@@ -323,7 +324,7 @@ def archive_data_resource(
                 tasks = [_one(i, k) for i, k in enumerate(s3_keys)]
                 return await asyncio.gather(*tasks)
 
-            gathered = asyncio.run(_fetch_all())
+            gathered = sync_run(_fetch_all())
             return [r for _, r in sorted(gathered) if r is not None]
 
     return dlt.resource(

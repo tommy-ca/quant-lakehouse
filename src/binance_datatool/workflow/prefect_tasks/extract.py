@@ -7,7 +7,6 @@ They accept explicit dependency injection for testability.
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 from binance_datatool.archive.client import ArchiveClient
@@ -99,8 +98,10 @@ def extract_archive(
     if cache.is_fresh(symbol, data_type, iv, trade_type, freq_str):
         files = cache.list_cached(symbol, data_type, iv, trade_type, freq_str)
     else:
+        from binance_datatool.common.async_utils import sync_run
+
         client = ArchiveClient()
-        raw_files = asyncio.run(client.list_symbol_files(tt, freq, dt_enum, symbol, interval=iv))
+        raw_files = sync_run(client.list_symbol_files(tt, freq, dt_enum, symbol, interval=iv))
         files = [{"key": f.key, "last_modified": f.last_modified} for f in raw_files]
         cache.refresh(symbol, data_type, iv, trade_type, freq_str)
 
@@ -121,7 +122,7 @@ def extract_archive(
     resource = archive_data_resource(symbol, s3_keys, interval=iv, data_type=data_type)
     return _run_dlt(
         resource,
-        source_name=f"archive_{trade_type}_{data_type}",
+        source_name=f"archive_{trade_type}_{data_type}_{symbol}",
         catalog_path=catalog_path,
     )
 
