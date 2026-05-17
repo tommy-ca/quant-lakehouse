@@ -26,31 +26,31 @@ During the execution of Phase 2 of the Migration Plan, a code review identified 
 
 ### 3.1 Resolving the Event Loop Conflict
 
-#### Approach A: Dedicated Thread for Async Loop (Recommended)
-Wrap the async SDK calls in a synchronous helper that runs the coroutine in a separate, dedicated thread.
-*   **Pros:** Isolates the event loop entirely from Prefect's environment. Safe for any caller.
-*   **Cons:** Slight overhead of thread creation.
+#### Approach A: Persistent Background Event Loop (Recommended)
+Create a single, persistent background thread that runs an `asyncio` event loop. All coroutines from synchronous `dlt` resources are dispatched to this loop using `asyncio.run_coroutine_threadsafe`.
+*   **Pros:** Isolates the event loop from Prefect safely. Extremely low overhead since threads aren't created per-call.
+*   **Cons:** Requires managing the lifecycle of the background thread.
 
-#### Approach B: Detect Existing Loop
-Attempt to use `asyncio.get_running_loop()`. If a loop exists, use `loop.run_until_complete()`.
-*   **Pros:** Avoids thread overhead.
-*   **Cons:** `run_until_complete()` is generally unsafe to call on a loop that is already running (it blocks the loop).
+#### Approach B: Spawning Threads Per Call
+Wrap each async SDK call in a helper that spawns a new thread, runs `asyncio.run()`, and exits.
+*   **Pros:** Isolates the event loop.
+*   **Cons:** Massive thread creation overhead inside iterative `dlt` extraction loops; highly inefficient.
 
 ### 3.2 Resolving the DuckDB Concurrency Gap
 
-#### Approach A: Extend the Concurrency Guard (Recommended)
-Apply the existing `prefect.concurrency.sync` guard (`"ducklake-writer"`) to all `run_dlt_*` extraction tasks in `prefect_flows.py`.
-*   **Pros:** Uses Prefect's native concurrency limits. Simple to implement. Guarantees safety.
-*   **Cons:** Forces all database writes (both Bronze dlt extraction and Silver transform writes) to be strictly sequential. However, the actual network fetching inside `dlt` is fast, so the bottleneck is acceptable.
+#### Approach A: Separate Parallel Extract and Serial Load (Recommended)
+Configure `dlt` to write extracted data to the filesystem (e.g., Parquet files) without accessing `catalog.duckdb` directly during extraction. Then, add a separate, strictly sequential Prefect task to load all generated files into DuckDB.
+*   **Pros:** Retains full parallel network extraction. Only the actual database writes are serialized.
+*   **Cons:** Requires changes to the `dlt` destination configuration.
 
-#### Approach B: In-Memory / Ephemeral Bronze Catalogs
-Have `dlt` write to temporary, per-task DuckDB files or in-memory catalogs, then merge them in a sequential step.
-*   **Pros:** Maximizes parallelism.
-*   **Cons:** Extremely complex implementation. Breaks the simplicity of the Bronze layer pattern. High risk of orphaned files.
+#### Approach B: Extend Concurrency Guard Over Entire Run
+Apply the `"ducklake-writer"` guard to all `run_dlt_*` extraction tasks in `prefect_flows.py`.
+*   **Pros:** Simple.
+*   **Cons:** Holds a global database lock during slow network I/O, forcing all extractions to be completely sequential and destroying performance.
 
 ## 4. Key Decisions
-*   **Event Loop**: Adopt **Approach 3.1A**. We will create a `sync_run` utility in `binance_datatool.common` to safely execute coroutines in a background thread and use it in all `dlt` resources instead of `asyncio.run()`.
-*   **Concurrency**: Adopt **Approach 3.2A**. We will wrap the execution of all `run_dlt_*` tasks in `prefect_flows.py` with the `"ducklake-writer"` concurrency guard.
+*   **Event Loop**: Adopt **Approach 3.1A**. We will create a `sync_run` utility in `binance_datatool.common` backed by a persistent background event loop thread.
+*   **Concurrency**: Adopt **Approach 3.2A**. We will decouple `dlt` extraction from DuckDB loading, allowing parallel network I/O and serialized database writes.
 
 ## 5. Scope Boundaries
 *   We will only address the concurrency issues related to DuckDB writes.
