@@ -44,8 +44,13 @@ def build_pipeline(
         override_data_path=True,
     )
 
+    # Ensure local pipelines directory exists to avoid permission issues in home dir
+    pipelines_dir = str(Path(lp_abs).parent / ".dlt" / "pipelines")
+    Path(pipelines_dir).mkdir(parents=True, exist_ok=True)
+
     return dlt.pipeline(
         pipeline_name=source_name,
+        pipelines_dir=pipelines_dir,
         destination=dest,
         dataset_name=dataset_name,
         progress="log",
