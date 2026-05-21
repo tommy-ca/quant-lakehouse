@@ -1,0 +1,21 @@
+schema: '2.0'
+stages:
+  build-backtesting-dataset:
+    cmd: uv run python scripts/build_backtesting_dataset.py --lake-path ./lake
+      --lookback-days 30 --top-n 50
+    deps:
+    - path: scripts/build_backtesting_dataset.py
+      hash: md5
+      md5: 7dd1784d8822e0738b927cbe1f6c2523
+      size: 3051
+    - path: src/binance_datatool/
+      hash: md5
+      md5: 98a8cc702e7bdb8dc17006fa3cc21dd3.dir
+      size: 1038840
+      nfiles: 166
+    outs:
+    - path: lake/
+      hash: md5
+      md5: c754c98fb6522281598e0e22ad609b8e.dir
+      size: 83146121
+      nfiles: 8596

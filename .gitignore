@@ -229,3 +229,7 @@ skills-lock.json
 test.duckdb
 *.duckdb
 $DB_PATH
+.dlt/
+.dvc/cache
+.dvc/tmp
+.dvc/log

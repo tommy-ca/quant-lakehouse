@@ -1,0 +1,18 @@
+cmd: uv run python scripts/build_backtesting_dataset.py --lake-path ./lake 
+  --lookback-days 30 --top-n 50
+deps:
+- path: scripts/build_backtesting_dataset.py
+  hash: md5
+  md5: 7dd1784d8822e0738b927cbe1f6c2523
+  size: 3051
+- path: src/binance_datatool/
+  hash: md5
+  md5: 9b7f8dc21c3bc4c7c8d193567fae82fa.dir
+  size: 1027873
+  nfiles: 166
+outs:
+- path: lake/
+  hash: md5
+  md5: 71454b114b5ac76ed38b1563df62ac4c.dir
+  size: 58526764
+  nfiles: 2167

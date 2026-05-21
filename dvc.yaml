@@ -1,0 +1,8 @@
+stages:
+  build-backtesting-dataset:
+    cmd: uv run python scripts/build_backtesting_dataset.py --lake-path ./lake --lookback-days 30 --top-n 50
+    deps:
+      - src/binance_datatool/
+      - scripts/build_backtesting_dataset.py
+    outs:
+      - lake/
