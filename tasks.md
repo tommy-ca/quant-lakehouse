@@ -674,7 +674,22 @@ Cross:      ts_date                                                        (1/1)
 
 ---
 
+## Phase 46: Cloud-Native Hardening & Consumer SDK (Plan)
+
+**Goal**: Seamlessly scale consumption and automate the data lifecycle.
+
+| Status | ID | Type | Description |
+|--------|----|------|-------------|
+| ⏳ | 46.1 | FR | **Consumer SDK**: Build `binance-datatool-sdk` for zero-copy attachment of HF datasets via DuckDB. |
+| ⏳ | 46.2 | NFR | **Cloud-Native Auth**: Integrate DuckDB Secret Manager for secure S3/HF access in `get_connection()`. |
+| ⏳ | 46.3 | C | **CI/CD Automation**: Implement GitHub Actions for weekly `dvc repro` + HF publishing. |
+| ⏳ | 46.4 | NFR | **Ingestion Sharding**: Implement symbol-sharding for Top 200+ universe builds to handle high-frequency data volume. |
+| ⏳ | 46.5 | T | **Remote Integrity Audit**: Add a script to verify that `dvc.lock` hashes match the published HF Parquet files. |
+
+---
+
 ## Production Readiness & Scaling Roadmap
+...
 
 ### 1. Scaling Ingestion
 - [ ] **Top 100/200 Universe**: Expand `BacktestingDataProductFlow` to handle larger universes with automated symbol sharding.

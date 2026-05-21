@@ -235,3 +235,6 @@ $DB_PATH
 .dvc/log
 lake/
 lake_*/
+/.dvc/cache
+/.dvc/tmp
+/.dvc/log
