@@ -30,45 +30,73 @@ def extract_klines(
     symbol: str,
     interval: str = "1h",
     trade_type: str = "spot",
-    catalog_path: str | None = None,
+    lake_path: str | None = None,
 ) -> dict:
     """Run dlt pipeline to ingest Binance klines for one symbol."""
     tt = TradeType(trade_type)
     source = build_binance_source(symbols=[symbol], interval=interval, trade_type=tt)
-    return _run_dlt(source, source_name=f"binance_{trade_type}", catalog_path=catalog_path)
+    res = _run_dlt(
+        source,
+        source_name=f"binance_{trade_type}",
+        lake_path=lake_path,
+        dataset_name="bronze",
+        destination="ducklake",
+    )
+    return {"dlt_result": res}
 
 
 def extract_agg_trades(
     symbol: str,
     trade_type: str = "spot",
-    catalog_path: str | None = None,
+    lake_path: str | None = None,
 ) -> dict:
     """Run dlt pipeline to ingest Binance aggTrades for one symbol."""
     tt = TradeType(trade_type)
     source = build_binance_source(symbols=[symbol], data_type="aggTrades", trade_type=tt)
-    return _run_dlt(source, source_name=f"agg_trades_{trade_type}", catalog_path=catalog_path)
+    res = _run_dlt(
+        source,
+        source_name=f"agg_trades_{trade_type}",
+        lake_path=lake_path,
+        dataset_name="bronze",
+        destination="ducklake",
+    )
+    return {"dlt_result": res}
 
 
 def extract_trades(
     symbol: str,
     trade_type: str = "spot",
-    catalog_path: str | None = None,
+    lake_path: str | None = None,
 ) -> dict:
     """Run dlt pipeline to ingest Binance raw trades for one symbol."""
     tt = TradeType(trade_type)
     source = build_binance_source(symbols=[symbol], data_type="trades", trade_type=tt)
-    return _run_dlt(source, source_name=f"trades_{trade_type}", catalog_path=catalog_path)
+    res = _run_dlt(
+        source,
+        source_name=f"trades_{trade_type}",
+        lake_path=lake_path,
+        dataset_name="bronze",
+        destination="ducklake",
+    )
+    return {"dlt_result": res}
 
 
 def extract_funding_rate(
     symbol: str,
     trade_type: str = "um",
-    catalog_path: str | None = None,
+    lake_path: str | None = None,
 ) -> dict:
     """Run dlt pipeline to ingest Binance fundingRate for one symbol."""
     tt = TradeType(trade_type)
     source = build_binance_source(symbols=[symbol], data_type="fundingRate", trade_type=tt)
-    return _run_dlt(source, source_name=f"funding_rate_{trade_type}", catalog_path=catalog_path)
+    res = _run_dlt(
+        source,
+        source_name=f"funding_rate_{trade_type}",
+        lake_path=lake_path,
+        dataset_name="bronze",
+        destination="ducklake",
+    )
+    return {"dlt_result": res}
 
 
 def extract_archive(
@@ -120,11 +148,12 @@ def extract_archive(
         return {"tables_loaded": [], "files_count": 0}
 
     resource = archive_data_resource(symbol, s3_keys, interval=iv, data_type=data_type)
-    return _run_dlt(
+    res = _run_dlt(
         resource,
         source_name=f"archive_{trade_type}_{data_type}_{symbol}",
         catalog_path=catalog_path,
     )
+    return {"dlt_result": res}
 
 
 def extract_metadata(

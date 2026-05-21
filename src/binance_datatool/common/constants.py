@@ -44,6 +44,30 @@ STABLECOINS: frozenset[str] = frozenset({
 })
 # fmt: on
 
+# Fiat currencies
+FIATS: frozenset[str] = frozenset(
+    {
+        "EUR",
+        "GBP",
+        "TRY",
+        "IDR",
+        "JPY",
+        "BRL",
+        "USD",
+        "AUD",
+        "ARS",
+        "COP",
+        "CZK",
+        "MXN",
+        "NGN",
+        "PLN",
+        "RON",
+        "RUB",
+        "UAH",
+        "ZAR",
+    }
+)
+
 # Suffixes that identify leveraged-token bases on spot (e.g. BNBUP, BTCDOWN).
 LEVERAGE_SUFFIXES: tuple[str, ...] = ("UP", "DOWN", "BULL", "BEAR")
 
@@ -59,3 +83,36 @@ QUOTE_BASE_EXCLUDES: dict[str, tuple[str, frozenset[str]]] = {
     "BUSD": ("USD", frozenset({"BNB"})),
     "TUSD": ("USD", frozenset({"USDT"})),
 }
+
+# Known meme and political coins that are frequently filtered from institutional universes.
+# Normalized to base assets (without '1000' prefixes).
+MEME_COINS: frozenset[str] = frozenset(
+    {
+        "DOGE",
+        "SHIB",
+        "PEPE",
+        "FLOKI",
+        "BONK",
+        "MEME",
+        "WIF",
+        "BOME",
+        "MYRO",
+        "TRUMP",
+        "MAGA",
+        "FARTCOIN",
+        "CHIP",
+        "PENGU",
+        "LAB",
+        "VVV",
+        "HYPE",
+        "LUNC",
+        "GIGGLE",
+        "ROBO",
+        "VIRTUAL",
+        "PUMP",
+        "BIO",
+        "ARC",
+        "SKYAI",
+        "UB",
+    }
+)

@@ -2,13 +2,6 @@
 
 Provides ``build_pipeline`` and ``run_source`` to standardize how dlt
 pipelines connect to DuckDB or DuckLake destinations.
-
-DuckLake (default): lakehouse storage with catalog + filesystem.
-  Automatic partitioning, ACID transactions, metadata management.
-  Files stored in ``{lake_path}/data/``, catalog in ``{lake_path}/_catalog/``.
-
-DuckDB (legacy): single-file database.
-  Used when ``destination="duckdb"`` is explicitly requested.
 """
 
 from __future__ import annotations
@@ -25,27 +18,31 @@ def build_pipeline(
     destination: str = "ducklake",
     lake_path: str | None = None,
 ) -> dlt.Pipeline:
-    """Build a dlt pipeline configured for DuckLake with a DuckDB catalog."""
+    """Build a dlt pipeline configured for DuckDB or DuckLake."""
 
-    # DuckLake: lakehouse with catalog + storage
-    _lp = lake_path or "./lake"
-    lp_abs = str(Path(_lp).resolve())
-    catalog_abs = str(Path(lp_abs) / "metadata.duckdb")
+    lp_abs = str(Path(lake_path or "./lake").resolve())
     Path(lp_abs).mkdir(parents=True, exist_ok=True)
 
-    dest = dlt.destinations.ducklake(
-        credentials=dlt.destinations.impl.ducklake.configuration.DuckLakeCredentials(
-            ducklake_name=source_name.replace("-", "_"),
-            catalog=f"duckdb:///{catalog_abs}",
-            storage=f"file://{lp_abs}",
-        ),
-        dataset_name=dataset_name,
-        local_dir=lp_abs,
-        override_data_path=True,
-    )
+    if destination == "duckdb":
+        # Standard DuckDB destination
+        db_path = catalog_path or str(Path(lp_abs) / "catalog.duckdb")
+        dest = dlt.destinations.duckdb(db_path)
+    else:
+        # DuckLake: lakehouse with catalog + storage
+        catalog_abs = str(Path(lp_abs) / "metadata.duckdb")
+        dest = dlt.destinations.ducklake(
+            credentials=dlt.destinations.impl.ducklake.configuration.DuckLakeCredentials(
+                ducklake_name=source_name.replace("-", "_"),
+                catalog=f"duckdb:///{catalog_abs}",
+                storage=f"file://{lp_abs}",
+            ),
+            dataset_name=dataset_name,
+            local_dir=lp_abs,
+            override_data_path=True,
+        )
 
-    # Ensure local pipelines directory exists to avoid permission issues in home dir
-    pipelines_dir = str(Path(lp_abs).parent / ".dlt" / "pipelines")
+    # Use a lake-specific pipelines directory to avoid state collision
+    pipelines_dir = str(Path(lp_abs) / ".dlt" / "pipelines")
     Path(pipelines_dir).mkdir(parents=True, exist_ok=True)
 
     return dlt.pipeline(

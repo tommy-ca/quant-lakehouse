@@ -33,10 +33,12 @@ from binance_datatool.workflow import (
     VerifyResult,
 )
 from binance_datatool.workflow.prefect_flows import (
+    backtesting_data_product_flow,
     gap_fill_flow,
     health_flow,
     refresh_metadata_flow,
     sink_flow,
+    universe_maintenance_flow,
 )
 
 if TYPE_CHECKING:
@@ -945,3 +947,90 @@ def refresh_metadata_command(
         duckdb_path=duckdb_path or str(catalog / "catalog.duckdb"),
     )
     typer.echo(f"Saved {n_syms} symbols for {trade_type.value}", err=True)
+
+
+@app.command("universe-maintenance")
+def universe_maintenance_command(
+    target_date: Annotated[
+        str | None,
+        typer.Option("--date", help="Target date for gold stats (YYYY-MM-DD)."),
+    ] = None,
+    lookback: Annotated[
+        int,
+        typer.Option("--lookback", help="Days to look back for catch-up/backfill."),
+    ] = 1,
+    catalog_path: Annotated[
+        str | None,
+        typer.Option("--catalog", help="DuckLake catalog directory."),
+    ] = None,
+    archive_home_path: Annotated[
+        str | None,
+        typer.Option("--archive-home", help="Override archive home."),
+    ] = None,
+) -> None:
+    """Maintain historical universe statistics in the Gold layer.
+
+    Synchronizes exchange metadata and builds daily point-in-time statistics
+    required for accurate, zero-survivorship-bias backtesting.
+    """
+    archive_home = resolve_archive_home(archive_home_path)
+    catalog = catalog_path or str(archive_home.parent / "lake")
+
+    universe_maintenance_flow(
+        lake_path=catalog,
+        target_date=target_date,
+        lookback_days=lookback,
+    )
+    typer.echo("Universe maintenance complete.", err=True)
+
+
+@app.command("build-dataset")
+def build_dataset_command(
+    trade_types: Annotated[
+        list[str] | None,
+        typer.Option("--trade-type", help="Trade types (spot, um, cm)."),
+    ] = None,
+    data_types: Annotated[
+        list[str] | None,
+        typer.Option("--data-type", help="Data types (klines, aggTrades)."),
+    ] = None,
+    lookback: Annotated[
+        int,
+        typer.Option("--lookback", help="Days of history to ingest."),
+    ] = 30,
+    catalog_path: Annotated[
+        str | None,
+        typer.Option("--catalog", help="DuckLake catalog directory."),
+    ] = None,
+    archive_home_path: Annotated[
+        str | None,
+        typer.Option("--archive-home", help="Override archive home."),
+    ] = None,
+) -> None:
+    """Build a production-ready backtesting dataset for the Top 50 universe.
+
+    Orchestrates the full lifecycle:
+    1. Instrument discovery & Gold layer statistics maintenance.
+    2. Top 50 Tradable Universe construction for each trade type.
+    3. Bulk ingestion and transformation of essential data types.
+    4. Health and consistency validation.
+    """
+
+    archive_home = resolve_archive_home(archive_home_path)
+    catalog = catalog_path or str(archive_home.parent / "lake")
+
+    report = backtesting_data_product_flow(
+        trade_types=trade_types,
+        data_types=data_types,
+        lookback_days=lookback,
+        lake_path=catalog,
+    )
+
+    typer.echo("--- Backtesting Data Product Report ---", err=True)
+    for tt, tt_data in report.items():
+        typer.echo(f"Venue: {tt.upper()}")
+        typer.echo(f"  Symbols in Universe: {tt_data['symbols_count']}")
+        for dt, results in tt_data["results"].items():
+            healthy_count = sum(1 for r in results.values() if r.get("healthy"))
+            typer.echo(f"  Data Type: {dt} -> {healthy_count}/{len(results)} healthy")
+    typer.echo("Dataset build complete.", err=True)

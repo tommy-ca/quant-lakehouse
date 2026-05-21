@@ -254,7 +254,7 @@ class ArchiveClient:
 
         return sorted(_extract_symbol(prefix) for prefix in child_prefixes)
 
-    async def list_symbol_files(
+    async def fetch_lifecycle_range(
         self,
         trade_type: TradeType,
         data_freq: DataFrequency,
@@ -263,51 +263,29 @@ class ArchiveClient:
         interval: str | None = None,
         *,
         session: aiohttp.ClientSession | None = None,
-    ) -> list[ArchiveFile]:
-        """List files for a single symbol directory on the Binance archive.
+    ) -> tuple[datetime | None, datetime | None]:
+        """Fetch the first and last data dates for a symbol from S3."""
+        files = await self.list_symbol_files(
+            trade_type, data_freq, data_type, symbol, interval, session=session
+        )
+        if not files:
+            return None, None
 
-        Builds the S3 prefix from the requested path parameters and
-        delegates to :meth:`list_files_in_dir`.  Callers that run many
-        concurrent symbol listings should pass a shared ``session`` so
-        every request reuses the same connection pool.
+        # Extract dates from file keys (YYYY-MM-DD)
+        import re
 
-        Args:
-            trade_type: Market segment (spot, um, cm).
-            data_freq: Partition frequency (daily, monthly).
-            data_type: Dataset type (klines, fundingRate, etc.).
-            symbol: Symbol directory to list (e.g. ``"BTCUSDT"``).
-            interval: Kline interval directory such as ``"1m"``.  Required
-                when ``data_type.has_interval_layer`` is ``True`` and must
-                be ``None`` otherwise.
-            session: Optional pre-existing ``aiohttp`` client session to
-                reuse.  When ``None`` a short-lived session is created
-                and closed inside this call.  When provided the caller
-                owns its lifecycle and this method does not close it.
+        date_pattern = re.compile(r"(\d{4}-\d{2}-\d{2})")
+        dates: list[datetime] = []
+        for f in files:
+            match = date_pattern.search(f.key)
+            if match:
+                dates.append(datetime.strptime(match.group(1), "%Y-%m-%d"))
 
-        Returns:
-            Archive file metadata entries for each file under the symbol
-            directory.
+        if not dates:
+            return None, None
 
-        Raises:
-            ValueError: If ``interval`` does not match
-                ``data_type.has_interval_layer``.
-        """
-        if data_type.has_interval_layer and interval is None:
-            msg = "interval is required for kline-class data_type"
-            raise ValueError(msg)
-        if not data_type.has_interval_layer and interval is not None:
-            msg = "interval is not applicable to non-kline data_type"
-            raise ValueError(msg)
-
-        prefix = f"{_build_prefix(trade_type, data_freq, data_type)}{symbol}/"
-        if interval is not None:
-            prefix = f"{prefix}{interval}/"
-
-        if session is None:
-            async with self._create_session() as local_session:
-                return await self.list_files_in_dir(local_session, prefix)
-
-        return await self.list_files_in_dir(session, prefix)
+        dates.sort()
+        return dates[0], dates[-1]
 
     async def list_symbol_files_batch(
         self,

@@ -272,10 +272,20 @@ def check_ducklake_anomalies(
     tn = _sanitize_identifier(table_name)
 
     def _where() -> str:
-        return "WHERE symbol = ? AND rtype = ?" if rtype else "WHERE symbol = ?"
+        where = "WHERE symbol = ?"
+        if rtype:
+            where += " AND rtype = ?"
+        if interval:
+            where += " AND interval = ?"
+        return where
 
     def _params() -> list:
-        return [symbol, rtype] if rtype else [symbol]
+        params = [symbol]
+        if rtype:
+            params.append(rtype)
+        if interval:
+            params.append(interval)
+        return params
 
     if not _table_exists(con, tn):
         return report

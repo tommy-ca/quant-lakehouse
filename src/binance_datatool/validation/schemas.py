@@ -150,20 +150,24 @@ class BronzeFundingRateSchema(pa.DataFrameModel):
 
 
 class VenuesSchema(pa.DataFrameModel):
-    """Schema for venue metadata (trade type + data type discovery)."""
+    """Schema for venue metadata (DBN/Tardis aligned)."""
 
     class Config:
         coerce = True
         strict = True
 
-    trade_type: str = pa.Field(nullable=False)
-    data_types: str = pa.Field(nullable=True)
-    frequencies: str = pa.Field(nullable=True)
+    venue_id: str = pa.Field(nullable=False)
+    name: str = pa.Field(nullable=False)
+    publisher_id: str = pa.Field(nullable=False)
+    dataset: str = pa.Field(nullable=False)
+    exchange_slug: str = pa.Field(nullable=False)
+    market_type: str = pa.Field(nullable=False)
+    status: str = pa.Field(nullable=False)
     fetched_at: int = pa.Field(ge=0, nullable=False)
 
 
 class SymbolsSchema(pa.DataFrameModel):
-    """Schema for symbol metadata (per-trade-type listing)."""
+    """Schema for symbol metadata (DBN/Tardis aligned)."""
 
     class Config:
         coerce = True
@@ -175,10 +179,29 @@ class SymbolsSchema(pa.DataFrameModel):
     base_asset: str = pa.Field(nullable=True)
     quote_asset: str = pa.Field(nullable=True)
     contract_type: str = pa.Field(nullable=True)
+    instrument_class: str = pa.Field(nullable=True)
     is_leverage: bool = pa.Field(nullable=True)
     is_stable_pair: bool = pa.Field(nullable=True)
     source: str = pa.Field(nullable=False)
     fetched_at: int = pa.Field(ge=0, nullable=False)
+
+
+class GoldUniverseStatsSchema(pa.DataFrameModel):
+    """Schema for daily universe statistics in the Gold layer."""
+
+    class Config:
+        coerce = True
+        strict = True
+
+    symbol: str = pa.Field(nullable=False)
+    venue_id: str = pa.Field(nullable=False)
+    ts_date: pl.Date = pa.Field(nullable=False)
+    base_asset: str = pa.Field(nullable=True)
+    quote_asset: str = pa.Field(nullable=True)
+    onboard_date: int = pa.Field(ge=0, nullable=True)
+    quote_volume: float = pa.Field(ge=0, nullable=False)
+    market_cap: float = pa.Field(ge=0, nullable=False)
+    last_price: float = pa.Field(ge=0, nullable=False)
 
 
 # ── Cross-column validation helpers ──────────────────────────────

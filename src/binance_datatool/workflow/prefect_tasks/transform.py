@@ -27,16 +27,27 @@ def transform_klines(
     catalog_path: str | None = None,
 ) -> int:
     """Read bronze klines from DuckDB, transform to Silver, write back."""
-    con = get_connection(catalog_path=catalog_path)
-    lp = Path("./lake").resolve()
+    lake_path = Path(catalog_path).parent if catalog_path else Path("./lake")
+    con = get_connection(lake_path=lake_path)
     try:
-        path = lp / "bronze" / "klines" / "*.parquet"
-        bronze = con.execute(
-            "SELECT open_time, open, high, low, close, volume, close_time, "
-            "quote_volume, count, taker_buy_volume, taker_buy_quote_volume, "
-            "symbol, interval FROM read_parquet(?) WHERE symbol = ?",
-            [str(path), symbol],
-        ).pl()
+        # Try reading from bronze schema first
+        try:
+            bronze = con.execute(
+                "SELECT open_time, open, high, low, close, volume, close_time, "
+                "quote_volume, count, taker_buy_volume, taker_buy_quote_volume, "
+                "symbol, interval FROM bronze.klines WHERE symbol = ? AND interval = ?",
+                [symbol, interval],
+            ).pl()
+        except Exception:
+            # Fallback to direct parquet read if view doesn't exist
+            path = lake_path / "bronze" / "klines" / "*.parquet"
+            bronze = con.execute(
+                "SELECT open_time, open, high, low, close, volume, close_time, "
+                "quote_volume, count, taker_buy_volume, taker_buy_quote_volume, "
+                "symbol, interval FROM read_parquet(?, union_by_name=True) WHERE symbol = ? AND interval = ?",
+                [str(path), symbol, interval],
+            ).pl()
+
         if bronze.is_empty():
             return 0
         silver = bronze_klines_to_silver(
@@ -44,7 +55,7 @@ def transform_klines(
         )
         if silver.is_empty():
             return 0
-        return write_silver_table(con, "klines", silver.to_arrow(), symbol)
+        return write_silver_table(con, "klines", silver.to_arrow(), symbol, lake_path=lake_path)
     finally:
         con.close()
 
@@ -54,21 +65,29 @@ def transform_trades(
     trade_type: str = "spot",
     catalog_path: str | None = None,
 ) -> int:
-    con = get_connection(catalog_path=catalog_path)
-    lp = Path("./lake").resolve()
+    lake_path = Path(catalog_path).parent if catalog_path else Path("./lake")
+    con = get_connection(lake_path=lake_path)
     try:
-        path = lp / "bronze" / "trades" / "*.parquet"
-        bronze = con.execute(
-            "SELECT trade_id, price, qty, quote_qty, time, is_buyer_maker, "
-            "is_best_match, symbol FROM read_parquet(?) WHERE symbol = ?",
-            [str(path), symbol],
-        ).pl()
+        try:
+            bronze = con.execute(
+                "SELECT trade_id, price, qty, quote_qty, time, is_buyer_maker, "
+                "is_best_match, symbol FROM bronze.trades WHERE symbol = ?",
+                [symbol],
+            ).pl()
+        except Exception:
+            path = lake_path / "bronze" / "trades" / "*.parquet"
+            bronze = con.execute(
+                "SELECT trade_id, price, qty, quote_qty, time, is_buyer_maker, "
+                "is_best_match, symbol FROM read_parquet(?, union_by_name=True) WHERE symbol = ?",
+                [str(path), symbol],
+            ).pl()
+
         if bronze.is_empty():
             return 0
         silver = bronze_trades_to_silver(bronze, symbol=symbol, trade_type=trade_type)
         if silver.is_empty():
             return 0
-        return write_silver_table(con, "agg_trades", silver.to_arrow(), symbol)
+        return write_silver_table(con, "agg_trades", silver.to_arrow(), symbol, lake_path=lake_path)
     finally:
         con.close()
 
@@ -78,20 +97,29 @@ def transform_agg_trades(
     trade_type: str = "spot",
     catalog_path: str | None = None,
 ) -> int:
-    con = get_connection(catalog_path=catalog_path)
-    lp = Path("./lake").resolve()
+    lake_path = Path(catalog_path).parent if catalog_path else Path("./lake")
+    con = get_connection(lake_path=lake_path)
     try:
-        path = lp / "bronze" / "agg_trades" / "*.parquet"
-        bronze = con.execute(
-            "SELECT agg_trade_id, price, quantity, transact_time, "
-            "is_buyer_maker, first_trade_id, last_trade_id, symbol "
-            "FROM read_parquet(?) WHERE symbol = ?",
-            [str(path), symbol],
-        ).pl()
+        try:
+            bronze = con.execute(
+                "SELECT agg_trade_id, price, quantity, transact_time, "
+                "is_buyer_maker, first_trade_id, last_trade_id, symbol "
+                "FROM bronze.agg_trades WHERE symbol = ?",
+                [symbol],
+            ).pl()
+        except Exception:
+            path = lake_path / "bronze" / "agg_trades" / "**" / "*.parquet"
+            bronze = con.execute(
+                "SELECT agg_trade_id, price, quantity, transact_time, "
+                "is_buyer_maker, first_trade_id, last_trade_id, symbol "
+                "FROM read_parquet(?, union_by_name=True) WHERE symbol = ?",
+                [str(path), symbol],
+            ).pl()
+
         silver = bronze_agg_trades_to_silver(bronze, symbol=symbol, trade_type=trade_type)
         if silver.is_empty():
             return 0
-        return write_silver_table(con, "agg_trades", silver.to_arrow(), symbol)
+        return write_silver_table(con, "agg_trades", silver.to_arrow(), symbol, lake_path=lake_path)
     finally:
         con.close()
 
@@ -101,17 +129,26 @@ def transform_funding_rate(
     trade_type: str = "um",
     catalog_path: str | None = None,
 ) -> int:
-    con = get_connection(catalog_path=catalog_path)
-    lp = Path("./lake").resolve()
+    lake_path = Path(catalog_path).parent if catalog_path else Path("./lake")
+    con = get_connection(lake_path=lake_path)
     try:
-        path = lp / "bronze" / "funding_rate" / "*.parquet"
-        bronze = con.execute(
-            "SELECT symbol, funding_time, funding_rate FROM read_parquet(?) WHERE symbol = ?",
-            [str(path), symbol],
-        ).pl()
+        try:
+            bronze = con.execute(
+                "SELECT symbol, funding_time, funding_rate FROM bronze.funding_rate WHERE symbol = ?",
+                [symbol],
+            ).pl()
+        except Exception:
+            path = lake_path / "bronze" / "funding_rate" / "**" / "*.parquet"
+            bronze = con.execute(
+                "SELECT symbol, funding_time, funding_rate FROM read_parquet(?, union_by_name=True) WHERE symbol = ?",
+                [str(path), symbol],
+            ).pl()
+
         silver = bronze_funding_rate_to_silver(bronze, symbol=symbol, trade_type=trade_type)
         if silver.is_empty():
             return 0
-        return write_silver_table(con, "funding_rate", silver.to_arrow(), symbol)
+        return write_silver_table(
+            con, "funding_rate", silver.to_arrow(), symbol, lake_path=lake_path
+        )
     finally:
         con.close()

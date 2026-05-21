@@ -31,7 +31,7 @@ from binance_datatool.dlt.resources.binance_funding import funding_rate_resource
 from binance_datatool.dlt.resources.binance_klines import klines_resource
 from binance_datatool.dlt.resources.binance_metadata import (
     build_metadata_source,
-    symbols_resource,
+    instruments_resource,
     venues_resource,
 )
 from binance_datatool.dlt.resources.binance_ws import ws_klines_resource
@@ -58,7 +58,7 @@ __all__ = [
     "build_rest_source",
     "build_ws_source",
     "venues_resource",
-    "symbols_resource",
+    "instruments_resource",
     "build_metadata_source",
     "archive_files_resource",
     "build_archive_index_source",

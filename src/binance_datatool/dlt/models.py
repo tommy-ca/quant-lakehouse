@@ -108,13 +108,19 @@ class FundingRateModel(BaseModel):
 
 
 class VenueModel(BaseModel):
-    """Pydantic model for venue metadata in dlt pipelines."""
+    """High-fidelity Pydantic model for venue metadata."""
 
     dlt_config: ClassVar[DltConfig] = {"is_authoritative_model": True}
 
-    trade_type: str
-    data_types: str | None = None
-    frequencies: str | None = None
+    venue_id: str  # Internal PK (e.g. binance_spot)
+    name: str  # Display name
+    publisher_id: str = "UNKNOWN"  # DBN: publisher identifier
+    dataset: str = "UNKNOWN"  # DBN: dataset identifier
+    exchange_slug: str = "unknown"  # Tardis: unique exchange identifier
+    market_type: str  # spot, um, cm
+    base_url: str
+    status: str
+    timezone: str = "UTC"
     fetched_at: int
 
 
@@ -128,10 +134,61 @@ class SymbolMetaModel(BaseModel):
     data_type: str
     base_asset: str | None = None
     quote_asset: str | None = None
-    contract_type: str | None = None
+    status: str = "trading"
+    tick_size: float | None = None
+    lot_size: float | None = None
+    min_notional: float | None = None
+    price_precision: int | None = None
+    qty_precision: int | None = None
+    contract_type: str | None = None  # Tardis: type
+    underlying: str | None = None
+    instrument_class: str | None = None  # DBN: instrument_class
+    multiplier: float | None = None
     is_leverage: bool | None = None
     is_stable_pair: bool | None = None
     source: str
+    fetched_at: int
+
+
+class InstrumentModel(BaseModel):
+    """High-fidelity Pydantic model for the Lakehouse registry."""
+
+    dlt_config: ClassVar[DltConfig] = {"is_authoritative_model": True}
+
+    symbol: str  # DBN: raw_symbol
+    venue_id: str
+    base_asset: str  # Tardis: baseCurrency
+    quote_asset: str  # Tardis: quoteCurrency
+    status: str
+    tick_size: float | None = None  # DBN: min_price_increment
+    lot_size: float | None = None  # Tardis: amountStep
+    min_notional: float | None = None  # Tardis: minNotional
+    price_precision: int | None = None
+    qty_precision: int | None = None
+    contract_type: str  # Tardis: type
+    instrument_class: str = "spot"  # DBN: instrument_class
+    underlying: str | None = None
+    multiplier: float = 1.0
+    is_leverage: bool = False
+    is_stable_pair: bool = False
+    onboard_date: int | None = None
+    delivery_date: int | None = None
+    first_data_at: int | None = None
+    last_data_at: int | None = None
+    fetched_at: int
+
+
+class MarketStatsModel(BaseModel):
+    """Pydantic model for 24h market statistics in dlt pipelines."""
+
+    dlt_config: ClassVar[DltConfig] = {"is_authoritative_model": True}
+
+    symbol: str
+    venue_id: str
+    quote_volume: float
+    price_change_pct: float
+    last_price: float
+    market_cap: float
     fetched_at: int
 
 
@@ -190,6 +247,8 @@ __all__ = [
     "FundingRateModel",
     "VenueModel",
     "SymbolMetaModel",
+    "InstrumentModel",
+    "MarketStatsModel",
     "RawKlineModel",
     "RawAggTradeModel",
     "RawFundingRateModel",

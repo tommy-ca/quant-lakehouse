@@ -46,5 +46,12 @@ class Settings(BaseSettings):
     # Metadata cache TTL in seconds (default 1 hour)
     cache_ttl_seconds: int = 3600
 
+    # Universe Construction
+    universe_volume_weight: float = 0.7
+    universe_mcap_weight: float = 0.3
+    universe_min_age_days: int = 180
+    universe_min_volume_usd: float = 1_000_000
+    universe_mcap_multiplier: float = 10.0
+
 
 settings = Settings()
