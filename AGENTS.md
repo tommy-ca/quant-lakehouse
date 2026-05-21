@@ -49,7 +49,7 @@ Each component handles its strength — no overlap:
 | **Pydantic** | Per-record validation within dlt resources (business rules, type coercion, authoritative schema) | `binance_datatool.dlt.models` — 8 models: KlineModel, AggTradeModel, FundingRateModel, VenueModel, SymbolMetaModel, Raw* models |
 | **SQLMesh** | Versioned SQL transforms (INCREMENTAL_BY_TIME_RANGE models, audits for data quality, column-level lineage) | `models/` — bronze/silver models, audits; optional via `dlt_sqlmesh_pipeline` |
 | **Prefect** | Orchestration (flow composition, parallelism, retries, concurrency guards, DLQ, cron scheduling) | `binance_datatool.workflow.prefect_flows` (thin @flow defs) + `workflow.prefect_tasks` (importable business logic) |
-| **DuckLake** | Primary storage — lakehouse with Parquet files + sqlite catalog. dlt destination by default. Handles partitioning, ACID, snapshots automatically. | `dlt.destinations.ducklake()` — managed by dlt; no manual catalog setup needed |
+| **DuckLake** | Primary storage — lakehouse with Parquet files + sqlite catalog. Integrated via native DuckDB extension. Handles partitioning, ACID, and multi-schema mapping (`registry`, `bronze`, `silver`) automatically via `get_connection()`. | `binance_datatool.storage.duckdb.get_connection()` — uses `ATTACH 'ducklake:...'` |
 | **DuckDB** | Legacy/fallback storage — single-file database. Used for unit tests and backward compatibility. | `dlt.destinations.duckdb()` — use via explicit `destination="duckdb"` |
 | **Adapters** | Minimal source adapters for multi-source support | `binance_datatool.adapter` — `DataSourceAdapter` protocol + `BinanceAdapter` (wraps ArchiveClient) |
 
@@ -74,6 +74,7 @@ Prefect orchestrates (dlt_sqlmesh_pipeline dispatcher)
   └─ data_type=fundingRate  → rest/archive    → transform_funding_rate_to_silver
   └─ Stage 0: gap detection (Prefect + DuckDB utility)
   └─ Stage 3: SQLMesh plan (versioned transforms, optional)
+  └─ Universe Maintenance   → sync_metadata → gold_pipeline (daily stats)
 ```
 
 ## Toolchain

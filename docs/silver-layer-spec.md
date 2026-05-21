@@ -257,76 +257,39 @@ rows = con.execute(
 
 ## DuckLake Catalog Design
 
-DuckLake uses DuckDB's lake extensions to query Parquet files in-place.
-No data is copied into DuckDB — views scan the lake directly.
+The Lakehouse uses the **native DuckLake extension** for DuckDB to provide ACID-compliant, zero-copy access to the Parquet data lake.
 
-### DuckLake Native Tables (unified across trade types)
-| Table | Columns | Partition | Description |
-|-------|---------|-----------|-------------|
-| `klines` | 19 | `trade_type, symbol, interval, ts_date` | Unified OHLCV across spot/um/cm |
-| `aggTrades` | 18 | `trade_type, symbol, ts_date` | Unified aggregated trades (includes first_trade_id, last_trade_id) |
-| `fundingRate` | 12 | `trade_type, symbol, ts_date` | Unified funding rates (um/cm, includes mark_price) |
-| `venues` | 7 | none | Venue metadata |
-| `symbols` | 11 | `trade_type` | Symbol metadata |
+### Automated Schema Mapping
+The `get_connection()` utility in `binance_datatool.storage.duckdb` automatically:
+1.  **Attaches** the Lakehouse catalog (`metadata.duckdb`) as a native DuckLake database.
+2.  **Exposes** all Lakehouse schemas (`registry`, `bronze`, `silver`) as top-level schemas in the DuckDB connection.
+3.  **Maps** tables to consistent names across schemas:
+    -   `registry.instruments`
+    -   `bronze.klines`, `bronze.agg_trades`, `bronze.funding_rate`
+    -   `silver.klines`, `silver.agg_trades`, `silver.funding_rate`
 
-Tables are unified: `trade_type` column differentiates spot/um/cm within each table.
-```sql
--- Query spot klines only
-SELECT * FROM klines WHERE trade_type = 'spot';
--- Cross-market comparison
-SELECT trade_type, AVG(close) FROM klines WHERE symbol = 'BTCUSDT' GROUP BY trade_type;
-```
+### Table Definitions
 
-### Analytics Views
-> **Removed (Phase 36)** — analytics views (`daily_ohlcv`, `latest_klines`, `stale_symbols`)
-> were removed as YAGNI. DuckDB can query Silver tables directly via Parquet in-place
-> without defining views. If needed, define in your analytics layer.
+| Table | Columns | Partition Key | Description |
+| :--- | :--- | :--- | :--- |
+| `klines` | 19 | `symbol` | Unified OHLCV (Spot/UM/CM). |
+| `agg_trades` | 18 | `symbol` | Unified trade stream (includes `side`, `size`). |
+| `funding_rate` | 12 | `symbol` | Perpetual funding events (UM/CM). |
+
+### Querying the Lakehouse
+Once connected via `get_connection()`, the lake can be queried using standard SQL:
 
 ```sql
--- Example: Daily OHLCV aggregation (query Silver table directly)
-SELECT CAST(ts_event / 86400000 AS DATE) AS trade_date,
-       symbol, trade_type,
-       FIRST(open) AS open, MAX(high) AS high,
-       MIN(low) AS low, LAST(close) AS close,
-       SUM(volume) AS volume
-FROM klines WHERE interval = '1h'
-GROUP BY trade_date, symbol, trade_type;
-```
+-- Direct access to the Top 50 universe metadata
+SELECT symbol, quote_volume
+FROM registry.market_stats
+WHERE venue_id = 'binance_spot'
+ORDER BY quote_volume DESC LIMIT 50;
 
-### DuckLake Catalog Implementation
-
-```python
-# DuckLake catalog is managed by dlt destination (dlt/destinations.py)
-# Manual attachment for ad-hoc querying:
-import duckdb
-con = duckdb.connect("lake/catalog.duckdb")
-con.execute("LOAD ducklake")
-con.execute(
-    "ATTACH 'ducklake:lake/metadata.ducklake' AS dl "
-    "(DATA_PATH 'lake/data', AUTOMATIC_MIGRATION true)"
-)
-con.execute("USE dl")
-
-# Silver tables are automatically available: klines, aggTrades, fundingRate
-con.execute("SELECT symbol, COUNT(*) FROM klines GROUP BY symbol")
-```
-
-### CLI Command to Attach DuckLake
-
-```bash
-# After sink, attach DuckLake for ACID-compliant querying
-binance-datatool sink spot --type klines --interval 1h --target duckdb --duckdb /path/to/db.duckdb BTCUSDT
-
-# Or use DuckDB directly
-duckdb /path/to/db.duckdb
-```
-```sql
--- Inside DuckDB, query the lake with DuckLake v1.0
-LOAD ducklake;
-ATTACH 'ducklake:/path/to/lake/metadata.ducklake' AS binance_lake (DATA_PATH '/path/to/lake/data');
-USE binance_lake;
--- Lake views scan Parquet in-place
-SELECT symbol, COUNT(*) FROM klines GROUP BY symbol;
+-- Zero-copy scan of Silver klines
+SELECT ts_event, open, close
+FROM silver.klines
+WHERE symbol = 'BTCUSDT' AND interval = '1h';
 ```
 
 ### Catalog Structure (DuckLake)

@@ -37,6 +37,12 @@ verify Binance historical market data — no manual command lookup required.
   [aria2](https://aria2.github.io/) that only fetches new or updated files
 - **Data integrity verification** — SHA256 checksum validation with
   timestamped marker caching
+- **High-Fidelity Metadata** — standardized `venues` and `instruments` registries aligned with Databento (DBN) and Tardis.dev schemas
+- **Medallion Lakehouse** — native DuckLake management of bronze, silver, and gold tiers with ACID transactions and automatic partition pruning
+- **Institutional Universe** — dynamic top-N construction with institutional
+  risk filtering (memes, leverage) and liquidity scoring
+- **Point-in-Time Metrics** — zero-survivorship-bias backtesting supported by
+  historical daily stats in the Gold layer
 - **Composable pipelines** — Unix-friendly design; commands read from
   stdin and write to stdout
 - **Async I/O** — concurrent S3 listing and parallel checksum verification
@@ -109,6 +115,27 @@ directly on the root app:
 | `health` | Check data completeness, freshness, integrity |
 | `sink` | Transform Bronze→Silver→DuckDB |
 | `refresh-metadata` | Refresh venue/symbol metadata |
+| `universe-maintenance` | Maintain historical Gold layer statistics |
+
+## Backtesting Data Product
+
+Generate a production-grade, validated dataset for a curated trading universe (e.g., Top 50 liquid assets) with a single command:
+
+```bash
+uv run python scripts/build_backtesting_dataset.py \
+    --lake-path ./lake_prod \
+    --lookback-days 30 \
+    --top-n 50 \
+    --trade-types spot um cm \
+    --data-types klines aggTrades fundingRate
+```
+
+This script orchestrates the full medallion lifecycle:
+1.  **Metadata Sync**: Discovers all current and historical assets.
+2.  **Universe Discovery**: Applies institutional risk filters (excludes memes, leveraged tokens).
+3.  **Bulk Ingestion**: Multi-threaded extraction from S3 and REST API.
+4.  **Medallion Transform**: Normalizes raw data to DBN/tardis.dev Silver schemas.
+5.  **Health Validation**: Automated anomaly detection and data quality reporting.
 
 > [!TIP]
 > Every command accepts symbols from **stdin** or as **positional args**,

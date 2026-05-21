@@ -73,6 +73,78 @@ Transforms Bronze archive ZIPs to Silver DuckDB tables via Polars.
 
 Updates venue and symbol metadata tables from archive listing or REST API.
 
+### universe-maintenance
+`binance-datatool -v universe-maintenance [--date YYYY-MM-DD] [--lookback 1] [--catalog PATH]`
+
+Maintains historical universe statistics in the Gold layer. Synchronizes metadata
+and builds daily point-in-time statistics required for accurate,
+zero-survivorship-bias backtesting.
+
+## Backtesting Data Product
+
+The primary entry point for generating a production-ready backtesting dataset is
+the `scripts/build_backtesting_dataset.py` script. This script orchestrates
+the full data product lifecycle.
+
+### Command Usage
+```bash
+uv run python scripts/build_backtesting_dataset.py \
+    --lake-path ./lake_prod \
+    --lookback-days 30 \
+    --top-n 50 \
+    --trade-types spot um cm \
+    --data-types klines aggTrades fundingRate
+```
+
+## Engineering Patterns
+1.  **Medallion-Native Architecture**: The system natively manages the
+    Medallion layers (`bronze`, `silver`, `gold`) within the DuckLake catalog.
+    Always prefer native table access over manual file scanning.
+2.  **Native Partitioning**: Silver and Gold layers are natively partitioned
+    by `symbol` and `ts_date` respectively. Queries using these filters
+    benefit from automatic partition pruning.
+3.  **Unified DuckLake Access**: Always use `get_connection(lake_path=...)` to
+    access the Lakehouse. This handles extension loading and schema mapping.
+
+## Reproducibility Workflow
+
+To build and freeze a reproducible dataset:
+
+1.  **Build**: `dvc repro` (runs the production data product flow).
+2.  **Verify**: Check health reports in the `lake` directory.
+3.  **Tag**: `git tag -a "data/v1" -m "Institutional Top 50"`
+4.  **Push**: `dvc push` (if remote is configured).
+
+## Point-in-Time Universe
+...
+Use the `UniverseBuilder` to construct tradable universes (e.g., Top 50) with
+institutional risk filters and zero survivorship bias.
+
+**Core Capabilities:**
+- **Institutional Filters**: Excludes memes (DOGE, PEPE, etc.), leveraged tokens (UP/DOWN), and junk symbols.
+- **Zero-Survivorship Bias**: Reconstructs universes using historical Gold layer snapshots, including assets that were later delisted.
+- **Look-ahead Protection**: Filters assets based on their historical `onboard_date`.
+- **Dynamic Normalization**: Automatically converts all quote volumes to USD using historical parity rates.
+
+**Usage (Python API):**
+```python
+from binance_datatool.universe.builder import UniverseBuilder
+
+builder = UniverseBuilder(lake_path="./lake")
+
+# 1. Get current Top 50 for live trading
+universe = builder.build_top_50(trade_type='spot')
+
+# 2. Get historical Top 50 for backtesting (Zero-Bias)
+backtest_ts = 1704067200000  # 2024-01-01
+universe = builder.build_top_50(
+    trade_type='um',
+    as_of_timestamp_ms=backtest_ts,
+    min_volume_usd=5_000_000,
+    min_age_days=180
+)
+```
+
 ## Prefect Workflows
 
 Full pipeline orchestration at `src/binance_datatool/workflow/prefect_flows.py`.
@@ -88,6 +160,7 @@ Full pipeline orchestration at `src/binance_datatool/workflow/prefect_flows.py`.
 | `sink_flow` | Bronze→Silver→DuckDB ingestion | Sequential (DuckDB constraint) |
 | `health_flow` | DuckLake anomaly detection | Sequential |
 | `refresh_metadata_flow` | Venue/symbol metadata refresh | Sequential |
+| `universe_maintenance_flow` | Metadata sync + Gold layer stats | Sequential |
 
 **Task graph:**
 ```
@@ -120,10 +193,10 @@ result = bulk_backfill(trade_type='spot', symbols=['BTCUSDT', 'ETHUSDT', 'SOLUSD
 | aggTrades | daily zips | ✓ | `aggTrades` | No |
 | trades | daily zips | ✓ | `aggTrades` (shared) | No |
 | fundingRate | monthly zips | ✓ | `fundingRate` | No |
+| universeStats | N/A (agg) | N/A | `gold.daily_universe_stats` | No |
 
-Pipeline sink handlers exist for these 4 types. Types like `bookDepth`, `bookTicker`,
-`indexPriceKlines`, `markPriceKlines`, `premiumIndexKlines`, `metrics`, `liquidationSnapshot`
-exist in the archive but have no Silver transform yet.
+Pipeline sink handlers exist for these 4 primary types. Gold layer stats are
+aggregated from Silver klines via the universe maintenance flow.
 
 ## Archive Structure (data.binance.vision)
 

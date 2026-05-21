@@ -79,22 +79,46 @@ This index provides a complete picture of the binance-datatool project after com
       - Silver schema column counts (19 klines, 18 aggTrades, 12 fundingRate)
       - Validation layer: per-record (Pydantic) and per-DataFrame (Pandera)
       - Prefect flow task graph
+### 8. **UNIVERSE_SPEC.md** ⭐ NEW
+   - **Purpose**: Specification for institutional-grade tradable universes
+   - **Covers**: Liquidity scoring, institutional risk filtering (memes, leverage),
+     point-in-time construction logic, and Gold layer data contracts
 
-### 7. **audit.md**
+### 9. **DATA_CONTRACT_SPEC.md** ⭐ NEW
+   - **Purpose**: Formal definition of the Dual-Layer Validation Contract
+   - **Covers**: Pydantic per-record ingest, Pandera per-DataFrame consistency,
+     and native DuckLake partition specifications.
+
+### 10. **REPRODUCIBILITY_SPEC.md** ⭐ NEW
+   - **Purpose**: Scientific reproducibility and dataset versioning guide
+   - **Covers**: DVC-backed building, Hugging Face Hub distribution, and
+     manifest-driven publishing (manifest.json, dvc.lock).
+
+### 11. **SDK_PLAN.md** ⭐ NEW
+   - **Purpose**: Roadmap for the `binance-datatool-sdk`
+   - **Covers**: Hugging Face integration, DuckLake consumption patterns, and planned API.
+
+### 12. **audit.md**
    - **Purpose**: Findings from code review
    - **Covers**: Current implementation, risks, priorities, recommendations
    - **Priorities**:
-     1. Data contracts + validation (✅ DONE: datacontract.py)
-     2. Lineage tracking (✅ DONE: lineage.py)
-     3. Multi-source adapter (✅ DONE: adapter/binance.py, 🔄 OKX/Bybit via CCXT)
-     4. Exchange clients (✅ DONE: exchange/ module)
-     5. Skills/subagents (⏳ TODO: implement from skills-subagents.md)
+     1. Data contracts + validation (✅ DONE: dlt/models.py)
+     2. Lineage tracking (✅ DONE: dlt state)
+     3. Multi-source adapter (✅ DONE: adapter/binance.py)
+     4. Point-in-Time Universe (✅ DONE: universe/ module)
 
 ---
 
 ## 🔧 Code & Implementation (Current State)
 
+### Universe Module (✅ PHASE 44)
+- **Directory**: `src/binance_datatool/universe/`
+- **Builder**: `UniverseBuilder` — builds Top-50 universes with institutional filters.
+- **Rates**: `RateProvider` — dynamic USD normalization with historical support.
+- **Pipeline**: `gold_pipeline.py` — materializes `gold.daily_universe_stats`.
+
 ### Adapter Package (✅ PHASE 42)
+...
 - **Directory**: `src/binance_datatool/adapter/`
 - **Files**: `protocol.py` (DataSourceAdapter), `binance.py` (BinanceAdapter),
   `registry.py` (SourceRegistry), `__init__.py`
@@ -422,22 +446,20 @@ If unclear on:
 
 ## ✨ Summary
 
-**Status**: Bronze→Silver→DuckLake pipeline validated. Adapter layer reintroduced (Phase 42). Legacy wrappers annotated for removal. Documentation synchronized with current codebase.
+**Status**: Medallion-Native Lakehouse architecture finalized and validated. All tiers (Registry, Bronze, Silver, Gold) are natively managed by DuckLake with optimized partitioning. High-fidelity metadata live on Hugging Face.
 
 **Impact**: This work enables:
-- End-to-end data pipeline: Archive → Bronze (dlt) → Silver (Polars) → DuckLake
-- Official Binance SDK integration for REST/WS market data
-- DuckLake v1.0 lakehouse with ACID transactions, partitioning, time-travel
-- DataOps: auto gap detection, health monitoring, lineage tracking
-- Multi-engine access: Polars, DuckDB read Parquet in-place
-- Agent-friendly CLI with formal commands and adapter protocol
-- Pydantic + Pandera dual-layer validation (per-record + per-DataFrame)
+- Institutional-grade datasets: Top 50 universe with zero survivorship bias.
+- ACID-compliant storage: Native DuckLake management of partitioned Parquet.
+- Industry alignment: Metadata standardized with DBN/Tardis schemas.
+- Scientific reproducibility: DVC-backed build state with DBN/Tardis views.
+- Zero-copy research: Direct attachment of HF datasets via DuckDB.
 
-**Next Step**: Staging validation of adapter-enabled Prefect flows + legacy removal.
+**Next Step**: Implementation of the `binance-datatool-sdk` for researcher consumption.
 
 ---
 
-**Document Version**: 1.0
-**Last Updated**: 2026-05-07
+**Document Version**: 3.0
+**Last Updated**: 2026-05-21
 **Maintainer**: Team
-**Status**: Active; implementation ready
+**Status**: Production-ready. Gold-standard platform for institutional crypto research.

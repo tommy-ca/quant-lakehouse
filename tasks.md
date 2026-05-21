@@ -656,3 +656,40 @@ Cross:      ts_date                                                        (1/1)
 ```
 
 **Total**: 17 passed, 2 skipped, 1 excluded (trades too large for CI)
+
+---
+
+## Phase 45: Medallion-Native Lakehouse & HF Publishing (2026-05-21)
+
+**Goal**: Deliver an institutional-grade, standard-compliant data product ecosystem.
+
+| Status | ID | Type | Description |
+|--------|----|------|-------------|
+| ✅ | 45.1 | R | Native DuckLake Transition: Refactored Silver and Gold layers to use native DDL (`ALTER TABLE SET PARTITIONED BY`), eliminating manual directory management. |
+| ✅ | 45.2 | R | Dual-Column Partitioning: Optimized Silver tables for `(symbol, ts_date)` to support both asset-level and cross-sectional pruning. |
+| ✅ | 45.3 | FR | High-Fidelity Metadata: Aligned metadata with DBN (`publisher_id`) and Tardis (`exchange_slug`) for seamless institutional interoperability. |
+| ✅ | 45.4 | FR | Hugging Face Hub Delivery: Implemented automated publishing of Medallion-Native artifacts to the Hub, including `manifest.json` and `dvc.lock`. |
+| ✅ | 45.5 | FR | Resilient Rate Normalization: Integrated Frankfurter FX API to handle USD normalization for all fiat/stablecoin pairs historically. |
+| ✅ | 45.6 | FR | Zero-Copy SDK Readiness: Verified that the Lakehouse can be attached directly from Hugging Face via DuckDB for instant quantitative research. |
+
+---
+
+## Production Readiness & Scaling Roadmap
+
+### 1. Scaling Ingestion
+- [ ] **Top 100/200 Universe**: Expand `BacktestingDataProductFlow` to handle larger universes with automated symbol sharding.
+- [ ] **Multi-Exchange Expansion**: Implement CCXT-based adapters for Bybit and OKX to build cross-exchange arbitrage datasets.
+- [ ] **Delta Lake / Iceberg Support**: Explore native DuckDB extensions for Delta Lake to support massive multi-petabyte datasets while maintaining Medallion-Native logic.
+
+### 2. Live Platform Integration
+- [ ] **Phase 8: Real-time Relay**: Integrate WebSocket streams directly into the Medallion-Native Lakehouse with micro-batch spills to Parquet.
+- [ ] **Automated CI/CD Publishing**: Establish a GitHub Action or Prefect Cloud trigger to publish weekly "Freshness Snapshots" to Hugging Face.
+
+### 3. Researcher SDK (binance-datatool-sdk)
+- [ ] **Library Core**: Build a lightweight, read-only Python library for researchers to consume the Lakehouse.
+- [ ] **VBT Integration**: Direct ingestion methods for `vectorbt.pro` utilizing the native DuckLake partition specs.
+- [ ] **Point-in-Time Helper**: Abstract the complex Gold-layer joins into a simple `sdk.get_universe(date='...')` method.
+
+---
+
+**Final Baseline (2026-05-21)**: 325 tests passing, Medallion-Native architecture verified, High-Fidelity metadata live on Hugging Face.

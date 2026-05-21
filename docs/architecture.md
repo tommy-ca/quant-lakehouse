@@ -18,7 +18,7 @@ src/binance_datatool/
 │   └── ccxt_pro.py          # CCXTProExchangeClient (optional dependency)
 ├── dlt/                     # Standalone dlt package — extract/load
 │   ├── __init__.py          # Re-exports all resources, sources, models, destinations
-│   ├── models.py            # 8 Pydantic models (Kline, AggTrade, FundingRate, Venue, SymbolMeta, Raw*)
+│   ├── models.py            # 9 Pydantic models (Kline, AggTrade, FundingRate, Venue, SymbolMeta, Instrument, MarketStats, Raw*)
 │   ├── destinations.py      # DuckDB/DuckLake destination builders (Hybrid DuckDB catalog support)
 │   ├── sources.py           # @dlt.source builders (Unified multi-symbol sources)
 │   └── resources/           # 8 @dlt.resource modules + shared client factory
@@ -28,43 +28,38 @@ src/binance_datatool/
 │       ├── binance_funding.py
 │       ├── binance_archive.py  # All data types: klines, aggTrades, trades, fundingRate, bookDepth, metrics, index/mark/premium klines
 │       ├── binance_ws.py
+│       ├── binance_market_stats.py # 24h market statistics
 │       ├── binance_metadata.py  # Venue + symbol metadata
 │       └── archive_index.py     # Local archive file index scanner
-├── dlt_sources/             # Legacy forwarding modules — all real logic migrated to dlt/resources/
 ├── transforms/              # Polars transforms (Bronze → Silver)
 │   ├── klines.py            # bronze_klines_to_silver() + μs auto-detection
 │   ├── agg_trades.py        # bronze_agg_trades_to_silver() + side derivation + Pandera validation
 │   └── funding_rate.py      # bronze_funding_rate_to_silver() + empty mark_price handling
 ├── validation/              # Pandera schemas + validation helpers
-│   └── schemas.py           # 6 Pandera schemas (bronze/silver for klines/aggTrades/fundingRate) + venue/symbol
+│   └── schemas.py           # 7 Pandera schemas (bronze/silver for klines/aggTrades/fundingRate) + Gold statistics
 ├── storage/                 # DuckDB/DuckLake storage layer
 │   ├── duckdb.py            # get_connection() with dynamic view mapping, write_silver_table()
 │   └── catalog.py           # DuckLakeCatalog with TABLE_DEFS for silver tables
 ├── workflow/                # Business logic orchestration
 │   ├── __init__.py          # Re-exports all workflow classes and result types
-│   ├── _shared.py           # Shared helpers (infer_symbol_info, validate_interval)
-│   ├── download.py          # ArchiveDownloadWorkflow
-│   ├── verify.py            # ArchiveVerifyWorkflow
-│   ├── list_files.py        # ArchiveListFilesWorkflow
-│   ├── list_symbols.py      # ArchiveListSymbolsWorkflow
-│   ├── results.py           # Result dataclasses (ListSymbolsResult, DiffResult, VerifyResult, etc.)
 │   ├── sink.py              # SinkWorkflow — Polars-based Bronze→Silver→DuckLake
 │   ├── gap_detection.py     # GapDetectionWorkflow — detect date gaps in silver tables
-│   ├── gap_fill.py          # GapFillWorkflow — REST API backfill for detected gaps
 │   ├── health_check.py      # HealthCheckWorkflow — completeness/freshness/integrity
 │   ├── metadata.py          # MetadataWorkflow — venue/symbol metadata refresh
-│   ├── explorer.py          # ExplorerWorkflow — browse local archive by data type/symbol
-│   ├── archive_cache.py     # Archive scanning + date-based caching
-│   ├── db.py                # Forwarding → storage.duckdb (backward compat)
-│   ├── prefect_flows.py     # Prefect @flow and @task definitions (thin wrappers)
-│   ├── prefect_tasks/       # Importable business logic for Prefect tasks
-│   │   ├── metadata.py      # sync_metadata_task()
-│   │   ├── extract.py       # run_dlt_pipeline(), download_archive_data(), build_metadata()
-│   │   └── transform.py     # bronze_to_silver(), bronze_agg_trades_to_silver(), bronze_funding_rate_to_silver()
-│   └── legacy/              # Legacy/archived modules
+│   ├── prefect_flows.py     # Prefect @flow and @task definitions (BacktestingDatasetFlow)
+│   └── prefect_tasks/       # Importable business logic for Prefect tasks
+│       ├── metadata.py      # sync_metadata_task()
+│       ├── extract.py       # extract_klines(), extract_archive(), etc.
+│       ├── universe.py      # build_universe_stats_task()
+│       └── transform.py     # transform_klines(), transform_agg_trades(), etc.
+├── universe/                # Application Layer: Tradable universes & Gold Stats
+│   ├── __init__.py
+│   ├── builder.py           # UniverseBuilder — builds Top-50 list with institutional filters
+│   ├── rates.py             # RateProvider — dynamic USD normalization (historical aware)
+│   └── gold_pipeline.py     # Gold Layer Pipeline — materializes daily universe stats
 ├── cli/                     # Typer CLI layer
 │   ├── __init__.py          # Root callback with -v/-vv verbosity and --archive-home
-│   └── archive.py           # All CLI commands (list-symbols, list-files, download, verify, gap-fill, health, sink, refresh-metadata)
+│   └── archive.py           # All CLI commands (build-dataset, universe-maintenance, etc.)
 ```
 
 ## Layered Design
@@ -74,7 +69,8 @@ below it — outer layers import inner layers, never the reverse.
 
 ```
 CLI  (cli/)
- └─▶ Workflow  (workflow/)  ── Prefect orchestration (prefect_flows + prefect_tasks)
+ └─▶ Workflow  (workflow/)  ── Prefect orchestration (BacktestingDatasetFlow)
+       ├─▶ Universe (universe/)  ── Application logic: Tradable Universes & Gold Stats
        ├─▶ dlt  (dlt/)       ── Extract/Load (REST, WS, archive resources)
        ├─▶ Transforms  (transforms/)  ── Polars Bronze→Silver
        ├─▶ Validation  (validation/)  ── Pandera schemas at pipeline boundaries
@@ -82,11 +78,10 @@ CLI  (cli/)
        ├─▶ Archive Client  (archive/) ── S3 HTTP client (data.binance.vision)
        └─▶ Common  (common/)          ── Shared enums, types, constants
 ```
-
-| Layer | Package | Responsibility |
 |-------|---------|----------------|
 | **CLI** | `binance_datatool.cli` | Typer command definitions, argument parsing, output formatting. |
 | **Workflow** | `binance_datatool.workflow` | Business logic orchestration; Prefect flows and tasks; gap detection, health checks, metadata. |
+| **Universe** | `binance_datatool.universe` | Tradable universes, gold layer statistics, dynamic USD rates. |
 | **dlt** | `binance_datatool.dlt` | Resources, source builders, Pydantic models, destination helpers. Standalone package. |
 | **Transforms** | `binance_datatool.transforms` | Polars-based Bronze→Silver transforms with Pandera validation. |
 | **Validation** | `binance_datatool.validation` | Pandera DataFrame schemas for pipeline boundary validation. |
@@ -119,9 +114,12 @@ Polars transforms (3 modules)
         silver.funding_rate (12 columns, normalized schema)
 Pandera schemas validate at each stage
   ↓
-DuckDB/DuckLake silver tables → Feature Store, analytics, gap detection
+Gold Layer stats (universe module)
+  ↓ daily aggregates → gold.daily_universe_stats
   ↓
-Prefect orchestrates (historical_pipeline, bulk_backfill, refresh_metadata, health)
+Backtesting Data Product (workflow module)
+  ↓ Orchestrates Top 50 discovery → Bulk ingestion → Validation
+  ↓ Emits: Curated backtesting dataset
 ```
 
 ## DuckLake Catalog Strategy
